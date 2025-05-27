@@ -1,138 +1,40 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>ルート案内アプリ</title>
+  <title>カスタムルート探索</title>
+  <meta charset="utf-8" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <style>
-    #map { height: 500px; }
-    #controls { margin: 10px 0; }
-    #pointList li { list-style: none; margin: 4px 0; padding: 6px; border: 1px solid #ccc; background: #f9f9f9; }
-    #searchResults li:hover { background-color: #eee; cursor: pointer; }
-  </style>
+  <style> #map { height: 600px; } </style>
 </head>
 <body>
-  <h2>ルート案内アプリ</h2>
-
-  <div id="controls">
-    <input id="placeInput" type="text" placeholder="地名を入力" style="width: 300px;" />
-    <button id="searchPlaceBtn">地名検索</button>
-    <ul id="searchResults"></ul>
-
-    <br>
-
-    <button id="addCurrentBtn">📍 現在地を追加</button>
-    <button id="clearPointsBtn">地点クリア</button>
-    <button id="openGoogleMapsBtn">Google Mapsで開く</button>
-
-    <h3>登録地点</h3>
-    <ul id="pointList"></ul>
-  </div>
-
+  <h2>カスタムルート探索</h2>
   <div id="map"></div>
-
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([35.681236, 139.767125], 13); // 東京駅
+    const map = L.map('map').setView([35.681236, 139.767125], 14); // 東京駅周辺
+
+    // OpenStreetMap タイル
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    let points = [];
-    let markers = [];
+    let startMarker = null;
+    let endMarker = null;
 
-    const placeInput = document.getElementById('placeInput');
-    const searchPlaceBtn = document.getElementById('searchPlaceBtn');
-    const searchResults = document.getElementById('searchResults');
-    const pointList = document.getElementById('pointList');
-    const clearPointsBtn = document.getElementById('clearPointsBtn');
-    const openGoogleMapsBtn = document.getElementById('openGoogleMapsBtn');
-    const addCurrentBtn = document.getElementById('addCurrentBtn');
-
-    function addPoint(lat, lng, label) {
-      points.push({ lat, lng, label });
-      const marker = L.marker([lat, lng]).addTo(map);
-      marker.bindPopup(label).openPopup();
-      markers.push(marker);
-      map.setView([lat, lng], 14);
-      refreshPointList();
-    }
-
-    function refreshPointList() {
-      pointList.innerHTML = '';
-      points.forEach((pt, i) => {
-        const li = document.createElement('li');
-        li.textContent = `${i + 1}. ${pt.label} (${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)})`;
-        pointList.appendChild(li);
-      });
-    }
-
-    // 地名検索
-    searchPlaceBtn.addEventListener('click', () => {
-      const query = placeInput.value.trim();
-      if (!query) return;
-
-      fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
-        .then(res => res.json())
-        .then(results => {
-          searchResults.innerHTML = '';
-          if (results.length === 0) {
-            searchResults.innerHTML = '<li>該当する場所がありませんでした。</li>';
-            return;
-          }
-
-          results.forEach(result => {
-            const li = document.createElement('li');
-            li.textContent = result.display_name;
-            li.addEventListener('click', () => {
-              addPoint(parseFloat(result.lat), parseFloat(result.lon), result.display_name);
-              searchResults.innerHTML = '';
-              placeInput.value = '';
-            });
-            searchResults.appendChild(li);
-          });
-        })
-        .catch(err => {
-          console.error('検索失敗', err);
-          alert('地名検索に失敗しました');
-        });
-    });
-
-    // 現在地取得
-    addCurrentBtn.addEventListener('click', () => {
-      if (!navigator.geolocation) {
-        alert('現在地取得はサポートされていません');
-        return;
+    map.on('click', function(e) {
+      if (!startMarker) {
+        startMarker = L.marker(e.latlng, { title: "Start" }).addTo(map);
+      } else if (!endMarker) {
+        endMarker = L.marker(e.latlng, { title: "Goal" }).addTo(map);
+        calculateRoute(startMarker.getLatLng(), endMarker.getLatLng());
       }
-
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          const { latitude, longitude } = pos.coords;
-          addPoint(latitude, longitude, '現在地');
-        },
-        err => {
-          alert('現在地取得に失敗しました: ' + err.message);
-        }
-      );
     });
 
-    // クリア
-    clearPointsBtn.addEventListener('click', () => {
-      points = [];
-      markers.forEach(marker => map.removeLayer(marker));
-      markers = [];
-      pointList.innerHTML = '';
-    });
-
-    // Google Mapsで開く
-    openGoogleMapsBtn.addEventListener('click', () => {
-      if (points.length < 2) {
-        alert('2地点以上を登録してください');
-        return;
-      }
-      const url = `https://www.google.com/maps/dir/${points.map(p => `${p.lat},${p.lng}`).join('/')}`;
-      window.open(url, '_blank');
-    });
+    function calculateRoute(start, end) {
+      // ダミー：直線ルートを表示（ここを独自アルゴリズムに置き換える）
+      L.polyline([start, end], { color: 'red' }).addTo(map);
+      console.log("ルート探索（仮）: ", start, end);
+    }
   </script>
 </body>
 </html>
