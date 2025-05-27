@@ -1,138 +1,107 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" />
-<title>地名順番入れ替えルート</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-<style>
-  #map { height: 400px; margin-top: 10px; }
-  #places { list-style: none; padding: 0; max-width: 300px; }
-  #places li { padding: 5px; background: #eee; margin: 2px 0; cursor: grab; }
-  #places li.dragging { opacity: 0.5; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>カスタムルート探索（並び替え対応）</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body { margin: 0; display: flex; height: 100vh; }
+    #map { flex: 1; }
+    #control-panel {
+      width: 300px; padding: 10px; background: #f9f9f9; overflow-y: auto;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    }
+    #waypoint-list { list-style: none; padding: 0; margin: 0; }
+    #waypoint-list li {
+      display: flex; align-items: center; margin-bottom: 5px;
+      background: #fff; padding: 5px; border: 1px solid #ddd; cursor: grab;
+    }
+    #waypoint-list li span { flex: 1; }
+    #waypoint-list li button {
+      border: none; background: transparent; font-size: 1em; cursor: pointer;
+      margin-left: 5px;
+    }
+    #add-form { display: flex; margin-bottom: 10px; }
+    #add-form input { flex: 1; padding: 5px; }
+    #add-form button { padding: 5px 10px; }
+  </style>
 </head>
 <body>
+  <div id="control-panel">
+    <h3>経由地リスト</h3>
+    <form id="add-form">
+      <input type="text" id="place-input" placeholder="地名を入力" />
+      <button type="submit">追加</button>
+    </form>
+    <ul id="waypoint-list"></ul>
+    <button id="draw-route">ルート描画</button>
+  </div>
+  <div id="map"></div>
 
-<h2>地名を入力し、順番を入れ替えてルート表示</h2>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+  <script>
+    const map = L.map('map').setView([35.681236, 139.767125], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
-<input type="text" id="placeInput" placeholder="地名を入力" />
-<button id="addBtn">追加</button>
+    const waypoints = [];
+    const markers = [];
+    let routeLine;
 
-<ul id="places"></ul>
+    const listEl = document.getElementById('waypoint-list');
+    const form = document.getElementById('add-form');
+    const input = document.getElementById('place-input');
+    const drawBtn = document.getElementById('draw-route');
 
-<div id="map"></div>
+    // Sortable for drag-and-drop
+    Sortable.create(listEl, { animation: 150 });
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script>
-  const map = L.map('map').setView([35.681236, 139.767125], 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map);
-
-  const placesEl = document.getElementById('places');
-  const input = document.getElementById('placeInput');
-  const addBtn = document.getElementById('addBtn');
-
-  let places = [];  // {name: string, latlng: L.LatLng} の配列
-  let markers = [];
-  let routeLine = null;
-
-  // 簡易ジオコーディング（OpenStreetMap Nominatim APIを利用）
-  async function geocode(placeName) {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(placeName)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.length > 0) {
-      return L.latLng(data[0].lat, data[0].lon);
-    }
-    return null;
-  }
-
-  async function addPlace(name) {
-    const latlng = await geocode(name);
-    if (!latlng) {
-      alert('場所が見つかりません: ' + name);
-      return;
-    }
-    places.push({name, latlng});
-    updatePlacesList();
-    updateMap();
-  }
-
-  function updatePlacesList() {
-    placesEl.innerHTML = '';
-    places.forEach((p, i) => {
-      const li = document.createElement('li');
-      li.draggable = true;
-      li.textContent = p.name;
-      li.dataset.index = i;
-
-      // ドラッグ開始
-      li.addEventListener('dragstart', (e) => {
-        li.classList.add('dragging');
-        e.dataTransfer.setData('text/plain', i);
-      });
-
-      // ドラッグ終了
-      li.addEventListener('dragend', () => {
-        li.classList.remove('dragging');
-      });
-
-      // ドロップ許可
-      li.addEventListener('dragover', (e) => {
-        e.preventDefault();
-      });
-
-      // ドロップ時の処理
-      li.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
-        const toIndex = parseInt(li.dataset.index);
-        if (fromIndex !== toIndex) {
-          const moved = places.splice(fromIndex, 1)[0];
-          places.splice(toIndex, 0, moved);
-          updatePlacesList();
-          updateMap();
-        }
-      });
-
-      placesEl.appendChild(li);
-    });
-  }
-
-  function updateMap() {
-    // マーカー削除
-    markers.forEach(m => map.removeLayer(m));
-    markers = [];
-
-    // マーカー追加
-    places.forEach(p => {
-      const m = L.marker(p.latlng).addTo(map).bindPopup(p.name);
-      markers.push(m);
-    });
-
-    // ルート線の削除
-    if (routeLine) map.removeLayer(routeLine);
-
-    // 線を引く
-    if (places.length > 1) {
-      const latlngs = places.map(p => p.latlng);
-      routeLine = L.polyline(latlngs, {color: 'red'}).addTo(map);
-      map.fitBounds(routeLine.getBounds());
-    } else if (places.length === 1) {
-      map.setView(places[0].latlng, 15);
-    }
-  }
-
-  addBtn.onclick = () => {
-    const val = input.value.trim();
-    if (val) {
-      addPlace(val);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const place = input.value.trim();
+      if (!place) return;
+      // Geocode via Nominatim
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}`);
+      const data = await res.json();
+      if (data.length === 0) { alert('場所が見つかりませんでした'); return; }
+      const { lat, lon, display_name } = data[0];
+      waypoints.push({ name: display_name, lat: +lat, lon: +lon });
+      addListItem(display_name);
       input.value = '';
-      input.focus();
-    }
-  };
+    });
 
-</script>
+    function addListItem(name) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${name}</span><button class="delete">✕</button>`;
+      listEl.appendChild(li);
+      li.querySelector('.delete').addEventListener('click', () => {
+        const idx = Array.from(listEl.children).indexOf(li);
+        waypoints.splice(idx, 1);
+        listEl.removeChild(li);
+      });
+    }
+
+    drawBtn.addEventListener('click', () => {
+      if (routeLine) map.removeLayer(routeLine);
+      // Clear old markers
+      markers.forEach(m => map.removeLayer(m));
+      markers.length = 0;
+
+      // Rebuild waypoints order
+      const ordered = Array.from(listEl.children).map((li, i) => waypoints[i]);
+      // Place markers
+      ordered.forEach(wp => {
+        const m = L.marker([wp.lat, wp.lon]).addTo(map).bindPopup(wp.name);
+        markers.push(m);
+      });
+      // Draw straight-line polyline
+      const latlngs = ordered.map(wp => [wp.lat, wp.lon]);
+      routeLine = L.polyline(latlngs, { color: 'blue' }).addTo(map);
+      map.fitBounds(routeLine.getBounds().pad(0.5));
+    });
+  </script>
 </body>
 </html>
