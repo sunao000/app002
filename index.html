@@ -3,65 +3,126 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>A*ルート探索＋現在地取得</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<title>道に沿ったルート探索＋現在地取得</title>
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet/dist/leaflet.css"
+/>
 <style>
-  body { margin: 0; display: flex; height: 100vh; }
-  #map { flex: 1; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    font-family: sans-serif;
+  }
+  #map {
+    flex: 1;
+  }
   #control-panel {
-    width: 270px; padding: 10px; background: #f9f9f9; font-family: Arial, sans-serif;
-    display: flex; flex-direction: column; gap: 8px;
+    width: 300px;
+    padding: 12px;
+    background: #fafafa;
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
-  select, button {
-    padding: 6px; font-size: 14px; width: 100%;
+  label {
+    font-weight: bold;
   }
-  #current-location-status {
-    font-size: 12px; color: #555;
+  select,
+  button {
+    padding: 8px;
+    font-size: 14px;
+  }
+  #status {
+    font-size: 12px;
+    color: #555;
+    min-height: 20px;
   }
 </style>
 </head>
 <body>
 
-  <div id="control-panel">
-    <h3>ルート探索（A*アルゴリズム）</h3>
-    <label for="start-node">開始ノード:</label>
-    <select id="start-node"></select>
+<div id="control-panel">
+  <h2>ルート探索</h2>
+  <label for="start-select">開始ノード</label>
+  <select id="start-select"></select>
 
-    <label for="goal-node">終了ノード:</label>
-    <select id="goal-node"></select>
+  <label for="goal-select">終了ノード</label>
+  <select id="goal-select"></select>
 
-    <button id="search-route">ルート検索</button>
-    <button id="get-current-location">現在地を取得</button>
-    <div id="current-location-status"></div>
-  </div>
+  <button id="btn-route">ルート検索</button>
+  <button id="btn-current">現在地を取得</button>
+  <div id="status"></div>
+</div>
 
-  <div id="map"></div>
+<div id="map"></div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
-  // 簡易道路ネットワークグラフ（ノードID: 緯度経度 + 隣接ノードとコスト）
+  // --- 道路ネットワーク（ノードID: {lat, lon, edges:[{to, cost}]}） ---
   const graph = {
-    '1': {lat:35.681, lon:139.766, edges:[{to:'2',cost:100},{to:'3',cost:150}]},
-    '2': {lat:35.682, lon:139.767, edges:[{to:'1',cost:100},{to:'4',cost:120}]},
-    '3': {lat:35.680, lon:139.768, edges:[{to:'1',cost:150},{to:'4',cost:130}]},
-    '4': {lat:35.683, lon:139.769, edges:[{to:'2',cost:120},{to:'3',cost:130}]},
+    '1': { lat: 35.681, lon: 139.766, edges: [{ to: '2', cost: 100 }, { to: '3', cost: 150 }] },
+    '2': { lat: 35.682, lon: 139.767, edges: [{ to: '1', cost: 100 }, { to: '4', cost: 120 }] },
+    '3': { lat: 35.680, lon: 139.768, edges: [{ to: '1', cost: 150 }, { to: '4', cost: 130 }] },
+    '4': { lat: 35.683, lon: 139.769, edges: [{ to: '2', cost: 120 }, { to: '3', cost: 130 }] }
   };
 
-  // ヒューリスティック関数（緯度経度の直線距離の近似）
-  function heuristic(id1, id2) {
-    const n1 = graph[id1];
-    const n2 = graph[id2];
-    const dx = n1.lat - n2.lat;
-    const dy = n1.lon - n2.lon;
-    return Math.sqrt(dx*dx + dy*dy);
+  // Leaflet 地図初期化
+  const map = L.map('map').setView([35.681, 139.766], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // ノードマーカー表示
+  const nodeMarkers = {};
+  for (const id in graph) {
+    const n = graph[id];
+    const m = L.circleMarker([n.lat, n.lon], {
+      radius: 7,
+      color: 'black',
+      fillColor: 'white',
+      fillOpacity: 1,
+      weight: 2,
+    })
+      .addTo(map)
+      .bindPopup(`ノード ${id}`);
+    nodeMarkers[id] = m;
   }
 
-  // A*アルゴリズム実装
+  // セレクトボックスにノード追加
+  const startSelect = document.getElementById('start-select');
+  const goalSelect = document.getElementById('goal-select');
+  for (const id in graph) {
+    const opt1 = document.createElement('option');
+    opt1.value = id;
+    opt1.textContent = id;
+    startSelect.appendChild(opt1);
+
+    const opt2 = document.createElement('option');
+    opt2.value = id;
+    opt2.textContent = id;
+    goalSelect.appendChild(opt2);
+  }
+  goalSelect.value = '4';
+
+  // ヒューリスティック（直線距離）
+  function heuristic(idA, idB) {
+    const a = graph[idA];
+    const b = graph[idB];
+    const dx = a.lat - b.lat;
+    const dy = a.lon - b.lon;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // A*アルゴリズム
   function astar(start, goal) {
     const openSet = new Set([start]);
     const cameFrom = {};
     const gScore = {};
     const fScore = {};
+
     Object.keys(graph).forEach(id => {
       gScore[id] = Infinity;
       fScore[id] = Infinity;
@@ -70,7 +131,7 @@
     fScore[start] = heuristic(start, goal);
 
     while (openSet.size > 0) {
-      // fScoreが最小のノードを取得
+      // fScore最小のノード選択
       let current = null;
       let minF = Infinity;
       openSet.forEach(node => {
@@ -81,32 +142,32 @@
       });
 
       if (current === goal) {
-        // ゴールに到達、経路復元
+        // 経路復元
         const path = [];
-        let cur = current;
-        while (cur) {
-          path.unshift(cur);
-          cur = cameFrom[cur];
+        let c = current;
+        while (c) {
+          path.unshift(c);
+          c = cameFrom[c];
         }
         return path;
       }
 
       openSet.delete(current);
 
-      for (const edge of graph[current].edges) {
-        const tentative_gScore = gScore[current] + edge.cost;
-        if (tentative_gScore < gScore[edge.to]) {
+      graph[current].edges.forEach(edge => {
+        const tentativeG = gScore[current] + edge.cost;
+        if (tentativeG < gScore[edge.to]) {
           cameFrom[edge.to] = current;
-          gScore[edge.to] = tentative_gScore;
-          fScore[edge.to] = tentative_gScore + heuristic(edge.to, goal);
+          gScore[edge.to] = tentativeG;
+          fScore[edge.to] = tentativeG + heuristic(edge.to, goal);
           openSet.add(edge.to);
         }
-      }
+      });
     }
-    return null; // 経路なし
+    return null;
   }
 
-  // 位置から一番近いノードを返す
+  // 緯度経度から最寄ノードを探す
   function findNearestNode(lat, lon) {
     let nearestId = null;
     let minDist = Infinity;
@@ -114,7 +175,7 @@
       const n = graph[id];
       const dx = n.lat - lat;
       const dy = n.lon - lon;
-      const dist = dx*dx + dy*dy;
+      const dist = dx * dx + dy * dy;
       if (dist < minDist) {
         minDist = dist;
         nearestId = id;
@@ -123,110 +184,78 @@
     return nearestId;
   }
 
-  // Leaflet 地図初期化
-  const map = L.map('map').setView([35.681, 139.766], 15);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map);
-
-  // ノードマーカーを表示
-  const nodeMarkers = {};
-  for (const id in graph) {
-    const node = graph[id];
-    const marker = L.circleMarker([node.lat, node.lon], {
-      radius: 6,
-      color: 'black',
-      fillColor: 'white',
-      fillOpacity: 1,
-    }).addTo(map)
-      .bindPopup(`ノード ${id}`);
-    nodeMarkers[id] = marker;
-  }
-
-  // セレクトボックスにノード追加
-  const startSelect = document.getElementById('start-node');
-  const goalSelect = document.getElementById('goal-node');
-  for (const id in graph) {
-    const optStart = document.createElement('option');
-    optStart.value = id;
-    optStart.textContent = id;
-    startSelect.appendChild(optStart);
-
-    const optGoal = document.createElement('option');
-    optGoal.value = id;
-    optGoal.textContent = id;
-    goalSelect.appendChild(optGoal);
-  }
-  goalSelect.value = '4';
-
+  // ルート描画用レイヤー
   let routeLayer = null;
+
+  // 現在地マーカー
   let currentLocationMarker = null;
 
-  // ルート検索ボタンの処理
-  document.getElementById('search-route').addEventListener('click', () => {
+  // ルート検索イベント
+  document.getElementById('btn-route').addEventListener('click', () => {
     const start = startSelect.value;
     const goal = goalSelect.value;
+
     if (start === goal) {
       alert('開始ノードと終了ノードは異なるものを選択してください');
       return;
     }
+
     const path = astar(start, goal);
     if (!path) {
       alert('経路が見つかりませんでした');
       return;
     }
-    // 既存のルートを削除
+
     if (routeLayer) {
       map.removeLayer(routeLayer);
       routeLayer = null;
     }
 
-    // 経路の緯度経度配列を作成
     const latlngs = path.map(id => [graph[id].lat, graph[id].lon]);
+    routeLayer = L.polyline(latlngs, { color: 'blue', weight: 5 }).addTo(map);
 
-    // ルートを地図に描画
-    routeLayer = L.polyline(latlngs, {color: 'blue', weight: 4}).addTo(map);
-
-    // 地図の表示範囲を調整
     map.fitBounds(routeLayer.getBounds().pad(0.2));
   });
 
-  // 現在地取得ボタンの処理
-  document.getElementById('get-current-location').addEventListener('click', () => {
-    const statusDiv = document.getElementById('current-location-status');
+  // 現在地取得イベント
+  document.getElementById('btn-current').addEventListener('click', () => {
+    const status = document.getElementById('status');
     if (!navigator.geolocation) {
-      statusDiv.textContent = 'このブラウザは位置情報に対応していません。';
+      status.textContent = '位置情報取得に対応していません。';
       return;
     }
-    statusDiv.textContent = '現在地を取得中...';
+    status.textContent = '現在地取得中...';
+
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      pos => {
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
-        statusDiv.textContent = `現在地取得成功: (${lat.toFixed(5)}, ${lon.toFixed(5)})`;
+        status.textContent = `現在地取得成功 (${lat.toFixed(5)}, ${lon.toFixed(5)})`;
 
-        // 既存マーカーがあれば削除
         if (currentLocationMarker) {
           map.removeLayer(currentLocationMarker);
         }
         currentLocationMarker = L.marker([lat, lon], {
+          title: '現在地',
           icon: L.icon({
-            iconUrl: 'https://cdn-icons-png.flaticon.com/512/64/64113.png',
+            iconUrl:
+              'https://cdn-icons-png.flaticon.com/512/64/64113.png',
             iconSize: [25, 25],
             iconAnchor: [12, 24],
           }),
-          title: '現在地'
-        }).addTo(map).bindPopup('現在地').openPopup();
+        })
+          .addTo(map)
+          .bindPopup('現在地')
+          .openPopup();
 
-        // 現在地に地図を移動
         map.setView([lat, lon], 16);
 
-        // 一番近いノードを探して開始ノードにセット
+        // 最寄ノードを自動設定
         const nearest = findNearestNode(lat, lon);
         startSelect.value = nearest;
       },
-      (err) => {
-        statusDiv.textContent = `現在地取得失敗: ${err.message}`;
+      err => {
+        status.textContent = `現在地取得失敗: ${err.message}`;
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
