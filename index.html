@@ -1,129 +1,90 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>ルート設計ツール</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+  <meta charset="UTF-8" />
+  <title>地名検索＆追加デモ</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
-    #map { height: 80vh; }
-    ul { list-style-type: none; padding: 0; }
-    li { padding: 4px; background: #eee; margin: 2px; cursor: move; }
+    #map { height: 500px; }
+    #pointList { list-style: none; padding-left: 0; }
+    #pointList li { margin-bottom: 4px; }
   </style>
 </head>
 <body>
+  <h2>地名検索＆地点追加デモ</h2>
 
-<h2>マニュアルルート設計ツール</h2>
-<div id="map"></div>
+  <input type="text" id="searchBox" placeholder="例：イオンモール徳島" style="width: 300px;" />
+  <button id="searchBtn">検索して追加</button>
 
-<ul id="pointsList"></ul>
-<button id="routeBtn">ルート表示</button>
-<button id="googleMapsBtn">Google Mapsで開く</button>
+  <h3>登録地点リスト</h3>
+  <ul id="pointList"></ul>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script src="https://unpkg.com/sortablejs@1.14.0/Sortable.min.js"></script>
+  <div id="map"></div>
 
-<script>
-const map = L.map('map').setView([34.0703, 134.5594], 13); // 徳島周辺
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([34.0661, 134.5593], 13); // 徳島あたりの座標
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
 
-let markers = [];
-let points = [];
+    const points = [];
+    const markers = [];
 
-map.on('click', async (e) => {
-  const lat = e.latlng.lat;
-  const lng = e.latlng.lng;
+    const searchBox = document.getElementById('searchBox');
+    const searchBtn = document.getElementById('searchBtn');
+    const pointList = document.getElementById('pointList');
 
-  // 地名取得（Nominatim）
-  const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
-  const data = await res.json();
-  const name = data.display_name || `(${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+    searchBtn.addEventListener('click', async () => {
+      const query = searchBox.value.trim();
+      if (!query) {
+        alert('検索ワードを入力してください');
+        return;
+      }
 
-  const marker = L.marker([lat, lng]).addTo(map).bindPopup(name);
-  markers.push(marker);
-  points.push({ lat, lng, name });
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+        const results = await res.json();
 
-  updatePointList();
-});
+        if (results.length === 0) {
+          alert('場所が見つかりませんでした');
+          return;
+        }
 
-function updatePointList() {
-  const list = document.getElementById('pointsList');
-  list.innerHTML = '';
+        const place = results[0];
+        const lat = parseFloat(place.lat);
+        const lon = parseFloat(place.lon);
+        const name = place.display_name;
 
-  points.forEach((pt, index) => {
-    const li = document.createElement('li');
-    li.textContent = pt.name;
-    li.setAttribute('data-id', index);
-    list.appendChild(li);
-  });
+        // マーカー作成＆追加
+        const marker = L.marker([lat, lon]).addTo(map).bindPopup(name);
+        markers.push(marker);
 
-  // 並び替え機能（Sortable.js）
-  Sortable.create(list, {
-    onEnd: function (evt) {
-      const newPoints = [];
-      const items = list.querySelectorAll('li');
-      items.forEach(item => {
-        const id = parseInt(item.getAttribute('data-id'));
-        newPoints.push(points[id]);
+        // ポイント保存
+        points.push({ lat, lng: lon, name });
+
+        // マップ中央を移動して拡大
+        map.setView([lat, lon], 16);
+
+        // リスト更新
+        updatePointList();
+
+        // 入力欄クリア
+        searchBox.value = '';
+      } catch (e) {
+        alert('検索中にエラーが発生しました');
+        console.error(e);
+      }
+    });
+
+    function updatePointList() {
+      pointList.innerHTML = '';
+      points.forEach((pt, idx) => {
+        const li = document.createElement('li');
+        li.textContent = `${idx + 1}: ${pt.name} (緯度:${pt.lat.toFixed(6)}, 経度:${pt.lng.toFixed(6)})`;
+        pointList.appendChild(li);
       });
-      points = newPoints;
     }
-  });
-}
-
-// OpenRouteService でルート表示
-document.getElementById('routeBtn').addEventListener('click', async () => {
-  if (points.length < 2) {
-    alert('2点以上の地点を選んでください');
-    return;
-  }
-
-  const coords = points.map(p => [p.lng, p.lat]);
-
-  const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'あなたのORS_APIキー', // ← OpenRouteService の API キーを入力
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ coordinates: coords })
-  });
-
-  const data = await res.json();
-
-  // 古いルートを削除
-  if (window.routeLayer) {
-    map.removeLayer(window.routeLayer);
-  }
-
-  window.routeLayer = L.geoJSON(data, {
-    style: { color: 'blue', weight: 5 }
-  }).addTo(map);
-
-  map.fitBounds(window.routeLayer.getBounds());
-});
-
-// Google Maps で同じ順番で開く
-document.getElementById('googleMapsBtn').addEventListener('click', () => {
-  if (points.length < 2) {
-    alert('地点が2つ以上必要です');
-    return;
-  }
-
-  const start = `${points[0].lat},${points[0].lng}`;
-  const end = `${points[points.length - 1].lat},${points[points.length - 1].lng}`;
-  const waypoints = points.slice(1, -1).map(p => `${p.lat},${p.lng}`).join('|');
-
-  let gmapUrl = `https://www.google.com/maps/dir/?api=1&origin=${start}&destination=${end}`;
-  if (waypoints) {
-    gmapUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
-  }
-
-  window.open(gmapUrl, '_blank');
-});
-</script>
-
+  </script>
 </body>
 </html>
