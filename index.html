@@ -1,107 +1,160 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>カスタムルート探索（並び替え対応）</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <style>
-    body { margin: 0; display: flex; height: 100vh; }
-    #map { flex: 1; }
-    #control-panel {
-      width: 300px; padding: 10px; background: #f9f9f9; overflow-y: auto;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-    }
-    #waypoint-list { list-style: none; padding: 0; margin: 0; }
-    #waypoint-list li {
-      display: flex; align-items: center; margin-bottom: 5px;
-      background: #fff; padding: 5px; border: 1px solid #ddd; cursor: grab;
-    }
-    #waypoint-list li span { flex: 1; }
-    #waypoint-list li button {
-      border: none; background: transparent; font-size: 1em; cursor: pointer;
-      margin-left: 5px;
-    }
-    #add-form { display: flex; margin-bottom: 10px; }
-    #add-form input { flex: 1; padding: 5px; }
-    #add-form button { padding: 5px 10px; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A*アルゴリズムで道に沿ったルート探索</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  body { margin: 0; display: flex; height: 100vh; }
+  #map { flex: 1; }
+  #control-panel { width: 250px; padding: 10px; background: #f9f9f9; }
+  select, button { width: 100%; margin-top: 10px; padding: 5px; }
+</style>
 </head>
 <body>
   <div id="control-panel">
-    <h3>経由地リスト</h3>
-    <form id="add-form">
-      <input type="text" id="place-input" placeholder="地名を入力" />
-      <button type="submit">追加</button>
-    </form>
-    <ul id="waypoint-list"></ul>
-    <button id="draw-route">ルート描画</button>
+    <h3>ルート探索（A*アルゴリズム）</h3>
+    <label>開始ノード:</label>
+    <select id="start-node"></select>
+    <label>終了ノード:</label>
+    <select id="goal-node"></select>
+    <button id="search-route">ルート検索</button>
   </div>
   <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
-  <script>
-    const map = L.map('map').setView([35.681236, 139.767125], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  // 簡単な道路ネットワークグラフ（ノードと隣接エッジ）
+  // ノードID: { lat, lon, edges: [{to, cost}] }
+  const graph = {
+    'A': { lat: 35.681236, lon: 139.767125, edges: [{to:'B', cost:1.2}, {to:'C', cost:1.8}] },
+    'B': { lat: 35.682500, lon: 139.770000, edges: [{to:'A', cost:1.2}, {to:'D', cost:1.1}] },
+    'C': { lat: 35.679000, lon: 139.765000, edges: [{to:'A', cost:1.8}, {to:'D', cost:1.5}] },
+    'D': { lat: 35.683000, lon: 139.773000, edges: [{to:'B', cost:1.1}, {to:'C', cost:1.5}, {to:'E', cost:1.3}] },
+    'E': { lat: 35.684500, lon: 139.776000, edges: [{to:'D', cost:1.3}] },
+  };
 
-    const waypoints = [];
-    const markers = [];
-    let routeLine;
+  // ヒューリスティック関数（直線距離の近似）
+  function heuristic(id1, id2) {
+    const n1 = graph[id1];
+    const n2 = graph[id2];
+    const dx = n1.lat - n2.lat;
+    const dy = n1.lon - n2.lon;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
 
-    const listEl = document.getElementById('waypoint-list');
-    const form = document.getElementById('add-form');
-    const input = document.getElementById('place-input');
-    const drawBtn = document.getElementById('draw-route');
-
-    // Sortable for drag-and-drop
-    Sortable.create(listEl, { animation: 150 });
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const place = input.value.trim();
-      if (!place) return;
-      // Geocode via Nominatim
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}`);
-      const data = await res.json();
-      if (data.length === 0) { alert('場所が見つかりませんでした'); return; }
-      const { lat, lon, display_name } = data[0];
-      waypoints.push({ name: display_name, lat: +lat, lon: +lon });
-      addListItem(display_name);
-      input.value = '';
+  // A*アルゴリズム
+  function astar(start, goal) {
+    const openSet = new Set([start]);
+    const cameFrom = {};
+    const gScore = {};
+    const fScore = {};
+    Object.keys(graph).forEach(id => {
+      gScore[id] = Infinity;
+      fScore[id] = Infinity;
     });
+    gScore[start] = 0;
+    fScore[start] = heuristic(start, goal);
 
-    function addListItem(name) {
-      const li = document.createElement('li');
-      li.innerHTML = `<span>${name}</span><button class="delete">✕</button>`;
-      listEl.appendChild(li);
-      li.querySelector('.delete').addEventListener('click', () => {
-        const idx = Array.from(listEl.children).indexOf(li);
-        waypoints.splice(idx, 1);
-        listEl.removeChild(li);
+    while (openSet.size > 0) {
+      // fScore最小のノードを選ぶ
+      let current = null;
+      let minF = Infinity;
+      openSet.forEach(n => {
+        if (fScore[n] < minF) {
+          minF = fScore[n];
+          current = n;
+        }
       });
+
+      if (current === goal) {
+        // ゴールへ到達。経路復元
+        const path = [];
+        let c = current;
+        while (c) {
+          path.unshift(c);
+          c = cameFrom[c];
+        }
+        return path;
+      }
+
+      openSet.delete(current);
+
+      for (const edge of graph[current].edges) {
+        const tentative_gScore = gScore[current] + edge.cost;
+        if (tentative_gScore < gScore[edge.to]) {
+          cameFrom[edge.to] = current;
+          gScore[edge.to] = tentative_gScore;
+          fScore[edge.to] = tentative_gScore + heuristic(edge.to, goal);
+          openSet.add(edge.to);
+        }
+      }
     }
 
-    drawBtn.addEventListener('click', () => {
-      if (routeLine) map.removeLayer(routeLine);
-      // Clear old markers
-      markers.forEach(m => map.removeLayer(m));
-      markers.length = 0;
+    return null; // 経路なし
+  }
 
-      // Rebuild waypoints order
-      const ordered = Array.from(listEl.children).map((li, i) => waypoints[i]);
-      // Place markers
-      ordered.forEach(wp => {
-        const m = L.marker([wp.lat, wp.lon]).addTo(map).bindPopup(wp.name);
-        markers.push(m);
-      });
-      // Draw straight-line polyline
-      const latlngs = ordered.map(wp => [wp.lat, wp.lon]);
-      routeLine = L.polyline(latlngs, { color: 'blue' }).addTo(map);
-      map.fitBounds(routeLine.getBounds().pad(0.5));
-    });
-  </script>
+  // Leaflet 地図セットアップ
+  const map = L.map('map').setView([35.682, 139.77], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // ノードマーカー表示
+  const nodeMarkers = {};
+  for (const id in graph) {
+    const node = graph[id];
+    const marker = L.circleMarker([node.lat, node.lon], { radius:6, color:'black' })
+      .addTo(map)
+      .bindPopup(`ノード: ${id}`);
+    nodeMarkers[id] = marker;
+  }
+
+  // セレクトボックスにノード追加
+  const startSelect = document.getElementById('start-node');
+  const goalSelect = document.getElementById('goal-node');
+  for (const id in graph) {
+    const opt1 = document.createElement('option');
+    opt1.value = id; opt1.textContent = id;
+    startSelect.appendChild(opt1);
+
+    const opt2 = document.createElement('option');
+    opt2.value = id; opt2.textContent = id;
+    goalSelect.appendChild(opt2);
+  }
+  goalSelect.value = 'E';  // デフォルト終了ノード
+
+  let routeLayer = null;
+
+  document.getElementById('search-route').addEventListener('click', () => {
+    const start = startSelect.value;
+    const goal = goalSelect.value;
+    if (start === goal) {
+      alert('開始ノードと終了ノードは異なるものを選択してください');
+      return;
+    }
+    const path = astar(start, goal);
+    if (!path) {
+      alert('経路が見つかりませんでした');
+      return;
+    }
+
+    // 既存ルート削除
+    if (routeLayer) {
+      map.removeLayer(routeLayer);
+      routeLayer = null;
+    }
+
+    // 経路の緯度経度配列作成
+    const latlngs = path.map(id => [graph[id].lat, graph[id].lon]);
+
+    // 地図に経路を描画
+    routeLayer = L.polyline(latlngs, { color: 'blue', weight: 4 }).addTo(map);
+
+    // 地図の表示範囲を経路に合わせて調整
+    map.fitBounds(routeLayer.getBounds().pad(0.2));
+  });
+</script>
 </body>
 </html>
