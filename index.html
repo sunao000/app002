@@ -1,89 +1,105 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>地名検索＆追加デモ</title>
+  <meta charset="UTF-8">
+  <title>ルート検索（全国の有名スポット対応）</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     #map { height: 500px; }
-    #pointList { list-style: none; padding-left: 0; }
-    #pointList li { margin-bottom: 4px; }
+    #pointList { list-style-type: decimal; padding-left: 20px; }
   </style>
 </head>
 <body>
-  <h2>地名検索＆地点追加デモ</h2>
+  <h2>ルート検索（全国の有名スポット対応）</h2>
 
-  <input type="text" id="searchBox" placeholder="例：イオンモール徳島" style="width: 300px;" />
-  <button id="searchBtn">検索して追加</button>
+  <input type="text" id="locationInput" placeholder="例: 東京タワー、イオンモール徳島">
+  <button onclick="searchAndAddPoint()">検索して追加</button>
 
-  <h3>登録地点リスト</h3>
   <ul id="pointList"></ul>
+  <button onclick="showRoute()">ルート表示</button>
 
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.min.js"></script>
+
   <script>
-    const map = L.map('map').setView([34.0661, 134.5593], 13); // 徳島あたりの座標
+    const map = L.map('map').setView([35.681236, 139.767125], 5); // 日本全体を見渡せる範囲で初期表示
+
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    const points = [];
-    const markers = [];
+    let points = [];
+    let markers = [];
+    let routingControl = null;
 
-    const searchBox = document.getElementById('searchBox');
-    const searchBtn = document.getElementById('searchBtn');
-    const pointList = document.getElementById('pointList');
-
-    searchBtn.addEventListener('click', async () => {
-      const query = searchBox.value.trim();
+    function searchAndAddPoint() {
+      const query = document.getElementById('locationInput').value.trim();
       if (!query) {
-        alert('検索ワードを入力してください');
+        alert("検索語を入力してください");
         return;
       }
 
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
-        const results = await res.json();
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10`;
 
-        if (results.length === 0) {
-          alert('場所が見つかりませんでした');
-          return;
-        }
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          const filtered = data.filter(item => {
+            const cls = item.class || '';
+            return ['tourism', 'amenity', 'leisure', 'shop'].includes(cls);
+          });
 
-        const place = results[0];
-        const lat = parseFloat(place.lat);
-        const lon = parseFloat(place.lon);
-        const name = place.display_name;
+          if (filtered.length === 0) {
+            alert("有名スポットとして一致する場所が見つかりませんでした。");
+            return;
+          }
 
-        // マーカー作成＆追加
-        const marker = L.marker([lat, lon]).addTo(map).bindPopup(name);
-        markers.push(marker);
+          const result = filtered[0];
+          const lat = parseFloat(result.lat);
+          const lon = parseFloat(result.lon);
+          const name = result.display_name;
 
-        // ポイント保存
-        points.push({ lat, lng: lon, name });
+          const marker = L.marker([lat, lon]).addTo(map).bindPopup(name).openPopup();
+          markers.push(marker);
+          points.push({ lat, lon, name });
 
-        // マップ中央を移動して拡大
-        map.setView([lat, lon], 16);
-
-        // リスト更新
-        updatePointList();
-
-        // 入力欄クリア
-        searchBox.value = '';
-      } catch (e) {
-        alert('検索中にエラーが発生しました');
-        console.error(e);
-      }
-    });
+          updatePointList();
+          document.getElementById('locationInput').value = "";
+          map.setView([lat, lon], 15);
+        })
+        .catch(err => {
+          alert("検索中にエラーが発生しました。");
+          console.error(err);
+        });
+    }
 
     function updatePointList() {
-      pointList.innerHTML = '';
+      const list = document.getElementById('pointList');
+      list.innerHTML = '';
       points.forEach((pt, idx) => {
         const li = document.createElement('li');
-        li.textContent = `${idx + 1}: ${pt.name} (緯度:${pt.lat.toFixed(6)}, 経度:${pt.lng.toFixed(6)})`;
-        pointList.appendChild(li);
+        li.textContent = pt.name;
+        list.appendChild(li);
       });
+    }
+
+    function showRoute() {
+      if (points.length < 2) {
+        alert("2地点以上を追加してください。");
+        return;
+      }
+
+      if (routingControl) {
+        map.removeControl(routingControl);
+      }
+
+      routingControl = L.Routing.control({
+        waypoints: points.map(p => L.latLng(p.lat, p.lon)),
+        routeWhileDragging: false,
+        show: false
+      }).addTo(map);
     }
   </script>
 </body>
