@@ -1,40 +1,138 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-  <title>カスタムルート探索</title>
-  <meta charset="utf-8" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <style> #map { height: 600px; } </style>
+<meta charset="UTF-8" />
+<title>地名順番入れ替えルート</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  #map { height: 400px; margin-top: 10px; }
+  #places { list-style: none; padding: 0; max-width: 300px; }
+  #places li { padding: 5px; background: #eee; margin: 2px 0; cursor: grab; }
+  #places li.dragging { opacity: 0.5; }
+</style>
 </head>
 <body>
-  <h2>カスタムルート探索</h2>
-  <div id="map"></div>
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script>
-    const map = L.map('map').setView([35.681236, 139.767125], 14); // 東京駅周辺
 
-    // OpenStreetMap タイル
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+<h2>地名を入力し、順番を入れ替えてルート表示</h2>
 
-    let startMarker = null;
-    let endMarker = null;
+<input type="text" id="placeInput" placeholder="地名を入力" />
+<button id="addBtn">追加</button>
 
-    map.on('click', function(e) {
-      if (!startMarker) {
-        startMarker = L.marker(e.latlng, { title: "Start" }).addTo(map);
-      } else if (!endMarker) {
-        endMarker = L.marker(e.latlng, { title: "Goal" }).addTo(map);
-        calculateRoute(startMarker.getLatLng(), endMarker.getLatLng());
-      }
+<ul id="places"></ul>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  const map = L.map('map').setView([35.681236, 139.767125], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  const placesEl = document.getElementById('places');
+  const input = document.getElementById('placeInput');
+  const addBtn = document.getElementById('addBtn');
+
+  let places = [];  // {name: string, latlng: L.LatLng} の配列
+  let markers = [];
+  let routeLine = null;
+
+  // 簡易ジオコーディング（OpenStreetMap Nominatim APIを利用）
+  async function geocode(placeName) {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(placeName)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.length > 0) {
+      return L.latLng(data[0].lat, data[0].lon);
+    }
+    return null;
+  }
+
+  async function addPlace(name) {
+    const latlng = await geocode(name);
+    if (!latlng) {
+      alert('場所が見つかりません: ' + name);
+      return;
+    }
+    places.push({name, latlng});
+    updatePlacesList();
+    updateMap();
+  }
+
+  function updatePlacesList() {
+    placesEl.innerHTML = '';
+    places.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.draggable = true;
+      li.textContent = p.name;
+      li.dataset.index = i;
+
+      // ドラッグ開始
+      li.addEventListener('dragstart', (e) => {
+        li.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', i);
+      });
+
+      // ドラッグ終了
+      li.addEventListener('dragend', () => {
+        li.classList.remove('dragging');
+      });
+
+      // ドロップ許可
+      li.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+
+      // ドロップ時の処理
+      li.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+        const toIndex = parseInt(li.dataset.index);
+        if (fromIndex !== toIndex) {
+          const moved = places.splice(fromIndex, 1)[0];
+          places.splice(toIndex, 0, moved);
+          updatePlacesList();
+          updateMap();
+        }
+      });
+
+      placesEl.appendChild(li);
+    });
+  }
+
+  function updateMap() {
+    // マーカー削除
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+
+    // マーカー追加
+    places.forEach(p => {
+      const m = L.marker(p.latlng).addTo(map).bindPopup(p.name);
+      markers.push(m);
     });
 
-    function calculateRoute(start, end) {
-      // ダミー：直線ルートを表示（ここを独自アルゴリズムに置き換える）
-      L.polyline([start, end], { color: 'red' }).addTo(map);
-      console.log("ルート探索（仮）: ", start, end);
+    // ルート線の削除
+    if (routeLine) map.removeLayer(routeLine);
+
+    // 線を引く
+    if (places.length > 1) {
+      const latlngs = places.map(p => p.latlng);
+      routeLine = L.polyline(latlngs, {color: 'red'}).addTo(map);
+      map.fitBounds(routeLine.getBounds());
+    } else if (places.length === 1) {
+      map.setView(places[0].latlng, 15);
     }
-  </script>
+  }
+
+  addBtn.onclick = () => {
+    const val = input.value.trim();
+    if (val) {
+      addPlace(val);
+      input.value = '';
+      input.focus();
+    }
+  };
+
+</script>
 </body>
 </html>
