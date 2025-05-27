@@ -2,20 +2,20 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ルート検索（現在地＋全国スポット対応）</title>
+  <title>マニュアルルート設定</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
-    #map { height: 500px; }
-    #pointList { list-style-type: decimal; padding-left: 20px; }
+    #map { height: 500px; margin-top: 10px; }
+    #pointList { list-style: decimal; }
   </style>
 </head>
 <body>
-  <h2>ルート検索（現在地＋全国スポット対応）</h2>
+  <h2>マニュアルルート設定アプリ</h2>
 
-  <input type="text" id="locationInput" placeholder="例: 東京タワー、イオンモール徳島">
-  <button onclick="searchAndAddPoint()">検索して追加</button>
+  <input type="text" id="locationInput" placeholder="例: 東京駅 / イオンモール徳島" />
+  <button onclick="addLocation()">地点追加</button>
   <ul id="pointList"></ul>
-  <button onclick="showRoute()">ルート表示</button>
+  <button onclick="showRoute()">ルートを表示</button>
 
   <div id="map"></div>
 
@@ -23,7 +23,7 @@
   <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.min.js"></script>
 
   <script>
-    const map = L.map('map').setView([35.681236, 139.767125], 5); // 初期表示（東京駅）
+    const map = L.map('map').setView([35.681236, 139.767125], 10); // 初期位置: 東京駅
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
@@ -33,48 +33,34 @@
     let markers = [];
     let routingControl = null;
 
-    // 🌐 現在地の取得
+    // 現在地の取得（最初に登録）
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(position => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-
-        const marker = L.marker([lat, lon]).addTo(map)
-          .bindPopup("現在地").openPopup();
-        markers.push(marker);
-
-        points.push({ lat, lon, name: "現在地" });
-        updatePointList();
-
-        map.setView([lat, lon], 14);
-      }, () => {
-        alert("現在地を取得できませんでした。");
+        const latlng = [position.coords.latitude, position.coords.longitude];
+        L.marker(latlng).addTo(map).bindPopup("現在地").openPopup();
+        map.setView(latlng, 14);
       });
     }
 
-    function searchAndAddPoint() {
+    // 地点を追加（地名をNominatim検索 → 緯度経度取得 → マーカー配置）
+    function addLocation() {
       const query = document.getElementById('locationInput').value.trim();
       if (!query) {
-        alert("検索語を入力してください");
+        alert("地名を入力してください");
         return;
       }
 
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10`;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`;
 
       fetch(url)
-        .then(res => res.json())
+        .then(response => response.json())
         .then(data => {
-          const filtered = data.filter(item => {
-            const cls = item.class || '';
-            return ['tourism', 'amenity', 'leisure', 'shop'].includes(cls);
-          });
-
-          if (filtered.length === 0) {
-            alert("有名スポットとして一致する場所が見つかりませんでした。");
+          if (data.length === 0) {
+            alert("地名が見つかりませんでした");
             return;
           }
 
-          const result = filtered[0];
+          const result = data[0];
           const lat = parseFloat(result.lat);
           const lon = parseFloat(result.lon);
           const name = result.display_name;
@@ -82,30 +68,29 @@
           const marker = L.marker([lat, lon]).addTo(map).bindPopup(name).openPopup();
           markers.push(marker);
           points.push({ lat, lon, name });
-
           updatePointList();
-          document.getElementById('locationInput').value = "";
-          map.setView([lat, lon], 15);
+
+          document.getElementById('locationInput').value = '';
         })
-        .catch(err => {
-          alert("検索中にエラーが発生しました。");
-          console.error(err);
+        .catch(error => {
+          console.error(error);
+          alert("検索中にエラーが発生しました");
         });
     }
 
     function updatePointList() {
       const list = document.getElementById('pointList');
       list.innerHTML = '';
-      points.forEach(pt => {
+      points.forEach((p, i) => {
         const li = document.createElement('li');
-        li.textContent = pt.name;
+        li.textContent = `${i + 1}. ${p.name}`;
         list.appendChild(li);
       });
     }
 
     function showRoute() {
       if (points.length < 2) {
-        alert("2地点以上を追加してください。");
+        alert("2地点以上登録してください");
         return;
       }
 
