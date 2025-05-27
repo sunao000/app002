@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ルート検索（全国の有名スポット対応）</title>
+  <title>ルート検索（現在地＋全国スポット対応）</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     #map { height: 500px; }
@@ -10,11 +10,10 @@
   </style>
 </head>
 <body>
-  <h2>ルート検索（全国の有名スポット対応）</h2>
+  <h2>ルート検索（現在地＋全国スポット対応）</h2>
 
   <input type="text" id="locationInput" placeholder="例: 東京タワー、イオンモール徳島">
   <button onclick="searchAndAddPoint()">検索して追加</button>
-
   <ul id="pointList"></ul>
   <button onclick="showRoute()">ルート表示</button>
 
@@ -24,7 +23,7 @@
   <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.min.js"></script>
 
   <script>
-    const map = L.map('map').setView([35.681236, 139.767125], 5); // 日本全体を見渡せる範囲で初期表示
+    const map = L.map('map').setView([35.681236, 139.767125], 5); // 初期表示（東京駅）
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
@@ -33,6 +32,25 @@
     let points = [];
     let markers = [];
     let routingControl = null;
+
+    // 🌐 現在地の取得
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(position => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+
+        const marker = L.marker([lat, lon]).addTo(map)
+          .bindPopup("現在地").openPopup();
+        markers.push(marker);
+
+        points.push({ lat, lon, name: "現在地" });
+        updatePointList();
+
+        map.setView([lat, lon], 14);
+      }, () => {
+        alert("現在地を取得できませんでした。");
+      });
+    }
 
     function searchAndAddPoint() {
       const query = document.getElementById('locationInput').value.trim();
@@ -78,7 +96,7 @@
     function updatePointList() {
       const list = document.getElementById('pointList');
       list.innerHTML = '';
-      points.forEach((pt, idx) => {
+      points.forEach(pt => {
         const li = document.createElement('li');
         li.textContent = pt.name;
         list.appendChild(li);
