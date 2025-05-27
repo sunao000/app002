@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>道に沿ったルート探索＋現在地取得</title>
+<title>地名検索でルート探索＋現在地取得</title>
 <link
   rel="stylesheet"
   href="https://unpkg.com/leaflet/dist/leaflet.css"
@@ -19,7 +19,7 @@
     flex: 1;
   }
   #control-panel {
-    width: 300px;
+    width: 320px;
     padding: 12px;
     background: #fafafa;
     box-shadow: 2px 0 6px rgba(0, 0, 0, 0.1);
@@ -30,7 +30,12 @@
   label {
     font-weight: bold;
   }
-  select,
+  input[type="text"] {
+    padding: 6px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+  }
   button {
     padding: 8px;
     font-size: 14px;
@@ -40,17 +45,44 @@
     color: #555;
     min-height: 20px;
   }
+  /* オートコンプリート候補リスト */
+  .autocomplete-list {
+    position: relative;
+  }
+  .autocomplete-items {
+    position: absolute;
+    border: 1px solid #ddd;
+    border-top: none;
+    z-index: 99;
+    background: white;
+    max-height: 120px;
+    overflow-y: auto;
+    width: 100%;
+  }
+  .autocomplete-items div {
+    padding: 6px;
+    cursor: pointer;
+  }
+  .autocomplete-items div:hover {
+    background-color: #e9e9e9;
+  }
 </style>
 </head>
 <body>
 
 <div id="control-panel">
-  <h2>ルート探索</h2>
-  <label for="start-select">開始ノード</label>
-  <select id="start-select"></select>
+  <h2>地名検索でルート探索</h2>
+  <label for="start-input">開始地名</label>
+  <div class="autocomplete-list">
+    <input id="start-input" type="text" autocomplete="off" placeholder="開始地名を入力" />
+    <div id="start-autocomplete" class="autocomplete-items"></div>
+  </div>
 
-  <label for="goal-select">終了ノード</label>
-  <select id="goal-select"></select>
+  <label for="goal-input">終了地名</label>
+  <div class="autocomplete-list">
+    <input id="goal-input" type="text" autocomplete="off" placeholder="終了地名を入力" />
+    <div id="goal-autocomplete" class="autocomplete-items"></div>
+  </div>
 
   <button id="btn-route">ルート検索</button>
   <button id="btn-current">現在地を取得</button>
@@ -61,12 +93,13 @@
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
-  // --- 道路ネットワーク（ノードID: {lat, lon, edges:[{to, cost}]}） ---
+  // --- 道路ネットワークと表示名 ---
+  // ノードID: {lat, lon, edges, name}
   const graph = {
-    '1': { lat: 35.681, lon: 139.766, edges: [{ to: '2', cost: 100 }, { to: '3', cost: 150 }] },
-    '2': { lat: 35.682, lon: 139.767, edges: [{ to: '1', cost: 100 }, { to: '4', cost: 120 }] },
-    '3': { lat: 35.680, lon: 139.768, edges: [{ to: '1', cost: 150 }, { to: '4', cost: 130 }] },
-    '4': { lat: 35.683, lon: 139.769, edges: [{ to: '2', cost: 120 }, { to: '3', cost: 130 }] }
+    '1': { lat: 35.681, lon: 139.766, edges: [{ to: '2', cost: 100 }, { to: '3', cost: 150 }], name: '東京駅' },
+    '2': { lat: 35.682, lon: 139.767, edges: [{ to: '1', cost: 100 }, { to: '4', cost: 120 }], name: '日本橋' },
+    '3': { lat: 35.680, lon: 139.768, edges: [{ to: '1', cost: 150 }, { to: '4', cost: 130 }], name: '八重洲口' },
+    '4': { lat: 35.683, lon: 139.769, edges: [{ to: '2', cost: 120 }, { to: '3', cost: 130 }], name: '京橋' }
   };
 
   // Leaflet 地図初期化
@@ -87,25 +120,9 @@
       weight: 2,
     })
       .addTo(map)
-      .bindPopup(`ノード ${id}`);
+      .bindPopup(`${n.name} (ID:${id})`);
     nodeMarkers[id] = m;
   }
-
-  // セレクトボックスにノード追加
-  const startSelect = document.getElementById('start-select');
-  const goalSelect = document.getElementById('goal-select');
-  for (const id in graph) {
-    const opt1 = document.createElement('option');
-    opt1.value = id;
-    opt1.textContent = id;
-    startSelect.appendChild(opt1);
-
-    const opt2 = document.createElement('option');
-    opt2.value = id;
-    opt2.textContent = id;
-    goalSelect.appendChild(opt2);
-  }
-  goalSelect.value = '4';
 
   // ヒューリスティック（直線距離）
   function heuristic(idA, idB) {
@@ -131,7 +148,6 @@
     fScore[start] = heuristic(start, goal);
 
     while (openSet.size > 0) {
-      // fScore最小のノード選択
       let current = null;
       let minF = Infinity;
       openSet.forEach(node => {
@@ -142,7 +158,6 @@
       });
 
       if (current === goal) {
-        // 経路復元
         const path = [];
         let c = current;
         while (c) {
@@ -190,34 +205,7 @@
   // 現在地マーカー
   let currentLocationMarker = null;
 
-  // ルート検索イベント
-  document.getElementById('btn-route').addEventListener('click', () => {
-    const start = startSelect.value;
-    const goal = goalSelect.value;
-
-    if (start === goal) {
-      alert('開始ノードと終了ノードは異なるものを選択してください');
-      return;
-    }
-
-    const path = astar(start, goal);
-    if (!path) {
-      alert('経路が見つかりませんでした');
-      return;
-    }
-
-    if (routeLayer) {
-      map.removeLayer(routeLayer);
-      routeLayer = null;
-    }
-
-    const latlngs = path.map(id => [graph[id].lat, graph[id].lon]);
-    routeLayer = L.polyline(latlngs, { color: 'blue', weight: 5 }).addTo(map);
-
-    map.fitBounds(routeLayer.getBounds().pad(0.2));
-  });
-
-  // 現在地取得イベント
+  // 現在地取得処理
   document.getElementById('btn-current').addEventListener('click', () => {
     const status = document.getElementById('status');
     if (!navigator.geolocation) {
@@ -250,9 +238,10 @@
 
         map.setView([lat, lon], 16);
 
-        // 最寄ノードを自動設定
+        // 最寄ノード名をstart入力欄にセット
         const nearest = findNearestNode(lat, lon);
-        startSelect.value = nearest;
+        startInput.value = graph[nearest].name;
+        startSelectedNode = nearest;
       },
       err => {
         status.textContent = `現在地取得失敗: ${err.message}`;
@@ -260,6 +249,87 @@
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   });
+
+  // ルート検索処理
+  document.getElementById('btn-route').addEventListener('click', () => {
+    if (!startSelectedNode || !goalSelectedNode) {
+      alert('開始地と終了地を正しく選択してください');
+      return;
+    }
+    if (startSelectedNode === goalSelectedNode) {
+      alert('開始地と終了地は異なる場所を選択してください');
+      return;
+    }
+
+    const path = astar(startSelectedNode, goalSelectedNode);
+    if (!path) {
+      alert('経路が見つかりませんでした');
+      return;
+    }
+
+    if (routeLayer) {
+      map.removeLayer(routeLayer);
+      routeLayer = null;
+    }
+
+    const latlngs = path.map(id => [graph[id].lat, graph[id].lon]);
+    routeLayer = L.polyline(latlngs, { color: 'blue', weight: 5 }).addTo(map);
+
+    map.fitBounds(routeLayer.getBounds().pad(0.2));
+  });
+
+  // --- オートコンプリート機能 ---
+  function setupAutocomplete(inputElem, listElem, onSelect) {
+    inputElem.addEventListener('input', () => {
+      const val = inputElem.value.trim().toLowerCase();
+      listElem.innerHTML = '';
+      if (!val) return;
+
+      // graphのnameから部分一致する候補抽出
+      const matches = Object.entries(graph)
+        .filter(([id, node]) => node.name.toLowerCase().includes(val))
+        .slice(0, 5);
+
+      matches.forEach(([id, node]) => {
+        const item = document.createElement('div');
+        item.textContent = node.name;
+        item.addEventListener('click', () => {
+          inputElem.value = node.name;
+          listElem.innerHTML = '';
+          onSelect(id, node.name);
+        });
+        listElem.appendChild(item);
+      });
+    });
+
+    // フォーカスアウトで候補非表示
+    inputElem.addEventListener('blur', () => {
+      setTimeout(() => {
+        listElem.innerHTML = '';
+      }, 150);
+    });
+  }
+
+  // 選択されたノードIDを保持
+  let startSelectedNode = null;
+  let goalSelectedNode = null;
+
+  const startInput = document.getElementById('start-input');
+  const startAutocomplete = document.getElementById('start-autocomplete');
+  const goalInput = document.getElementById('goal-input');
+  const goalAutocomplete = document.getElementById('goal-autocomplete');
+
+  setupAutocomplete(startInput, startAutocomplete, (id, name) => {
+    startSelectedNode = id;
+  });
+  setupAutocomplete(goalInput, goalAutocomplete, (id, name) => {
+    goalSelectedNode = id;
+  });
+
+  // 初期値設定（任意）
+  goalInput.value = graph['4'].name;
+  goalSelectedNode = '4';
+
 </script>
 
 </body>
