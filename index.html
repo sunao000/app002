@@ -2,170 +2,28 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>地図と地点管理</title>
+  <title>Leaflet 地図テスト</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+    crossorigin=""
   />
   <style>
     #map { height: 400px; width: 100%; }
-    #locations { margin-top: 10px; }
-    .location-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin: 5px 0;
-      padding: 5px;
-      border: 1px solid #ccc;
-      background: #f9f9f9;
-      cursor: move;
-    }
-    .location-name {
-      flex-grow: 1;
-    }
-    button {
-      margin-left: 10px;
-    }
   </style>
 </head>
 <body>
 
-<h2>地図と地点管理</h2>
-
-<input type="text" id="placeInput" placeholder="地名を入力" />
-<button id="addPlaceBtn">追加</button>
-<button id="currentLocBtn">現在地を取得</button>
-
+<h1>Leaflet 地図表示テスト</h1>
 <div id="map"></div>
 
-<div id="locations">
-  <h3>地点リスト（ドラッグで並べ替え可能）</h3>
-  <div id="locationList"></div>
-</div>
-
-<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" crossorigin=""></script>
 <script>
-  const map = L.map('map').setView([35.681236, 139.767125], 13); // 東京駅あたり
+  const map = L.map('map').setView([35.681236, 139.767125], 13); // 東京駅周辺
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors'
   }).addTo(map);
-
-  let markers = [];
-  let locations = [];
-
-  const locationList = document.getElementById('locationList');
-  const placeInput = document.getElementById('placeInput');
-  const addPlaceBtn = document.getElementById('addPlaceBtn');
-  const currentLocBtn = document.getElementById('currentLocBtn');
-
-  // 地名から座標を取得（Nominatim APIを利用）
-  async function geocode(placeName) {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(placeName)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data && data.length > 0) {
-      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), display_name: data[0].display_name };
-    } else {
-      alert('場所が見つかりませんでした。');
-      return null;
-    }
-  }
-
-  // マーカーとリストを追加
-  async function addLocation(placeName) {
-    const geo = await geocode(placeName);
-    if (!geo) return;
-
-    // マーカー作成
-    const marker = L.marker([geo.lat, geo.lon]).addTo(map)
-      .bindPopup(geo.display_name)
-      .openPopup();
-
-    markers.push(marker);
-    locations.push({ name: geo.display_name, lat: geo.lat, lon: geo.lon });
-
-    renderLocations();
-    map.setView([geo.lat, geo.lon], 13);
-  }
-
-  // リストを描画
-  function renderLocations() {
-    locationList.innerHTML = '';
-    locations.forEach((loc, i) => {
-      const div = document.createElement('div');
-      div.className = 'location-item';
-      div.setAttribute('data-index', i);
-
-      const span = document.createElement('span');
-      span.className = 'location-name';
-      span.textContent = loc.name;
-
-      const delBtn = document.createElement('button');
-      delBtn.textContent = '削除';
-      delBtn.onclick = () => {
-        // マーカー削除
-        map.removeLayer(markers[i]);
-        markers.splice(i, 1);
-        locations.splice(i, 1);
-        renderLocations();
-      };
-
-      div.appendChild(span);
-      div.appendChild(delBtn);
-      locationList.appendChild(div);
-    });
-  }
-
-  addPlaceBtn.onclick = () => {
-    const name = placeInput.value.trim();
-    if (name) {
-      addLocation(name);
-      placeInput.value = '';
-    }
-  };
-
-  // Sortable.jsでドラッグ＆ドロップ並べ替え
-  Sortable.create(locationList, {
-    animation: 150,
-    onEnd: (evt) => {
-      const item = locations.splice(evt.oldIndex, 1)[0];
-      const marker = markers.splice(evt.oldIndex, 1)[0];
-
-      locations.splice(evt.newIndex, 0, item);
-      markers.splice(evt.newIndex, 0, marker);
-
-      renderLocations();
-    },
-  });
-
-  // 現在地取得ボタン
-  currentLocBtn.onclick = () => {
-    if (!navigator.geolocation) {
-      alert('このブラウザは位置情報に対応していません');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-
-        const marker = L.marker([lat, lon], {color: 'blue'}).addTo(map)
-          .bindPopup('現在地')
-          .openPopup();
-
-        markers.push(marker);
-        locations.push({ name: '現在地', lat, lon });
-        renderLocations();
-        map.setView([lat, lon], 13);
-      },
-      (err) => {
-        alert('位置情報の取得に失敗しました');
-      }
-    );
-  };
 </script>
 
 </body>
