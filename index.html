@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>ルート案内アプリ</title>
+  <title>ルート案内アプリ（地名対応）</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     #map { height: 500px; }
@@ -12,14 +12,17 @@
   </style>
 </head>
 <body>
-  <h2>ルート案内アプリ（色分け＋役割指定機能）</h2>
+  <h2>ルート案内アプリ（地名＋色分け＋並べ替え）</h2>
 
   <div id="controls">
+    <input id="placeInput" type="text" placeholder="地名で検索（例：東京駅）" />
+    <button id="searchPlaceBtn">地名検索して追加</button>
+    <br><br>
     <input id="latInput" type="number" placeholder="緯度" step="0.000001" />
     <input id="lngInput" type="number" placeholder="経度" step="0.000001" />
-    <button id="addPointBtn">地点を追加</button>
+    <button id="addPointBtn">緯度経度で追加</button>
     <button id="drawRouteBtn">ルート表示</button>
-    <h3>登録地点（並び替えてルート順を決定）</h3>
+    <h3>登録地点（上から 出発地 → 経由地 → 目的地）</h3>
     <ul id="pointList"></ul>
   </div>
 
@@ -27,7 +30,7 @@
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    const apiKey = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9'; // OpenRouteService APIキーをここに入力
+    const apiKey = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9'; // ← OpenRouteService APIキーをここに入力
 
     const map = L.map('map').setView([35.681236, 139.767125], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -43,6 +46,8 @@
     const addPointBtn = document.getElementById('addPointBtn');
     const drawRouteBtn = document.getElementById('drawRouteBtn');
     const pointList = document.getElementById('pointList');
+    const placeInput = document.getElementById('placeInput');
+    const searchPlaceBtn = document.getElementById('searchPlaceBtn');
 
     function getRoleColor(index, total) {
       if (index === 0) return 'green';
@@ -95,6 +100,29 @@
       addPoint(lat, lng, '手入力地点');
       latInput.value = '';
       lngInput.value = '';
+    });
+
+    searchPlaceBtn.addEventListener('click', () => {
+      const query = placeInput.value.trim();
+      if (!query) {
+        alert('地名を入力してください');
+        return;
+      }
+      fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.length === 0) {
+            alert('地名が見つかりませんでした');
+            return;
+          }
+          const result = data[0];
+          addPoint(parseFloat(result.lat), parseFloat(result.lon), result.display_name);
+          placeInput.value = '';
+        })
+        .catch(err => {
+          console.error(err);
+          alert('地名の検索に失敗しました');
+        });
     });
 
     drawRouteBtn.addEventListener('click', () => {
