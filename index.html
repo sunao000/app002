@@ -80,23 +80,20 @@
       const lat = parseFloat(place.lat);
       const lon = parseFloat(place.lon);
       const index = points.length;
-      let label = '';
-      if (index === 0) label = '出発地';
-      else if (index === points.length - 1) label = '目的地';
-      else label = `経由地${index}`;
-
-      const marker = L.marker([lat, lon], {
-        title: `${label}: ${place.display_name}`,
-        icon: L.divIcon({ className: 'marker-label', html: `<span style="color:${label === '出発地' ? 'green' : label.startsWith('経由地') ? 'blue' : 'red'}">●</span>` })
-      }).addTo(map);
 
       points.push({ lat, lng: lon });
+      const marker = L.marker([lat, lon], {
+        title: `${place.display_name}`,
+        icon: L.divIcon({ className: 'marker-label', html: `<span style="color:gray">●</span>` })
+      }).addTo(map);
       markers.push(marker);
+
       const li = document.createElement('li');
       li.className = 'place-item';
-      li.textContent = `${label}: ${place.display_name}`;
+      li.textContent = `${place.display_name}`;
       document.getElementById('places').appendChild(li);
 
+      updateLabels();
       input.value = '';
     });
 
@@ -162,21 +159,23 @@
       return points;
     }
 
+    function updateLabels() {
+      const list = document.querySelectorAll('.place-item');
+      list.forEach((li, i) => {
+        const name = li.textContent.split(': ').pop();
+        const label = i === 0 ? '出発地' : (i === list.length - 1 ? '目的地' : `経由地${i}`);
+        li.textContent = `${label}: ${name}`;
+      });
+    }
+
     new Sortable(document.getElementById('places'), {
       onEnd: () => {
-        const newPoints = [];
-        const newMarkers = [];
-        const listItems = document.querySelectorAll('.place-item');
-        listItems.forEach((li, i) => {
-          const text = li.textContent.split(': ')[1];
-          const original = points[i];
-          const label = i === 0 ? '出発地' : (i === listItems.length - 1 ? '目的地' : `経由地${i}`);
-          li.textContent = `${label}: ${text}`;
-          newPoints.push(original);
-          newMarkers.push(markers[i]);
+        const reordered = Array.from(document.querySelectorAll('.place-item'));
+        const newPoints = reordered.map((li, i) => {
+          return points[Array.from(li.parentNode.children).indexOf(li)];
         });
         points.splice(0, points.length, ...newPoints);
-        markers.splice(0, markers.length, ...newMarkers);
+        updateLabels();
       }
     });
   </script>
