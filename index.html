@@ -77,27 +77,41 @@
     const nearbyOnlyCheckbox = document.getElementById('nearbyOnlyCheckbox');
 
     function refreshPointList() {
-      pointList.innerHTML = '';
-      points.forEach((pt, i) => {
-        const li = document.createElement('li');
-        li.draggable = true;
-        li.textContent = pt.name || `手入力地点 (${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)})`;
-        li.dataset.index = i;
-        const delBtn = document.createElement('button');
-        delBtn.textContent = '削除';
-        delBtn.style.marginLeft = '10px';
-        delBtn.onclick = () => {
-          map.removeLayer(markers[i]);
-          markers.splice(i, 1);
-          points.splice(i, 1);
-          refreshPointList();
-          redrawRouteIfExists();
-        };
-        li.appendChild(delBtn);
-        pointList.appendChild(li);
-      });
-      addDragAndDropHandlers();
+  pointList.innerHTML = '';
+  points.forEach((pt, i) => {
+    const li = document.createElement('li');
+    li.draggable = true;
+
+    let role = '';
+    if (i === 0) {
+      role = '出発地';
+    } else if (i === points.length - 1) {
+      role = '目的地';
+    } else {
+      role = `経由地${i}`;
     }
+
+    const nameOrCoords = pt.name ? pt.name : `${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)}`;
+    li.textContent = `${role}：${nameOrCoords}`;
+    li.dataset.index = i;
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '削除';
+    delBtn.style.marginLeft = '10px';
+    delBtn.onclick = () => {
+      map.removeLayer(markers[i]);
+      markers.splice(i, 1);
+      points.splice(i, 1);
+      refreshPointList();
+      redrawRouteIfExists();
+    };
+    li.appendChild(delBtn);
+    pointList.appendChild(li);
+  });
+
+  addDragAndDropHandlers();
+}
+
 
     function addPoint(lat, lng, name = null) {
       points.push({ lat, lng, name });
