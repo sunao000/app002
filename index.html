@@ -234,6 +234,15 @@
     // 指定緯度経度を中心にkm単位のviewbox作成（Nominatim用）
     function createViewbox(lat, lng, km = 5) {
       const latDiff = km / 111; // 緯度は約111kmで1度
-      const lng
-::contentReference[oaicite:13]{index=13}
+      const lngDiff = km / (111 * Math.cos(lat * Math.PI / 180));
+      const left = lng - lngDiff;
+      const right = lng + lngDiff;
+      const top = lat + latDiff;
+      const bottom = lat - latDiff;
+      return `&viewbox=${left},${top},${right},${bottom}&bounded=1`;
+    }
+
+    // Nominatimを使った地名検索
+    searchPlaceBtn.addEventListener
+::contentReference[oaicite:0]{index=0}
  
