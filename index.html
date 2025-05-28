@@ -1,162 +1,136 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ルートマップ</title>
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
-  />
-  <style>
-    #map {
-      height: 600px;
-      width: 100%;
+// 地図の初期化や各種設定
+let map;
+let userMarker;
+let userLatLng;
+let watchId;
+const points = [];
+
+function initMap() {
+  map = new google.maps.Map(document.getElementById("map"), {
+    center: { lat: 35.681236, lng: 139.767125 },
+    zoom: 13,
+  });
+
+  // 現在地の取得
+  if (navigator.geolocation) {
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        userLatLng = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        if (!userMarker) {
+          userMarker = new google.maps.Marker({
+            position: userLatLng,
+            map,
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 8,
+              fillColor: "#00F",
+              fillOpacity: 0.8,
+              strokeWeight: 2,
+              strokeColor: "#FFF",
+            },
+            title: "現在地",
+          });
+        } else {
+          userMarker.setPosition(userLatLng);
+        }
+        map.setCenter(userLatLng);
+      },
+      null,
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  }
+
+  const input = document.getElementById("searchInput");
+  const toggleNearby = document.getElementById("toggleNearby");
+  const autocomplete = new google.maps.places.Autocomplete(input);
+  autocomplete.bindTo("bounds", map);
+
+  autocomplete.addListener("place_changed", () => {
+    const place = autocomplete.getPlace();
+    if (!place.geometry || !place.geometry.location) return;
+
+    const location = {
+      lat: place.geometry.location.lat(),
+      lng: place.geometry.location.lng(),
+    };
+
+    // 近くの場所だけに制限するかどうかチェック
+    if (toggleNearby.checked && userLatLng) {
+      const dist = google.maps.geometry.spherical.computeDistanceBetween(
+        new google.maps.LatLng(userLatLng),
+        new google.maps.LatLng(location)
+      );
+      if (dist > 5000) {
+        alert("現在地から5km以内の場所を選んでください。");
+        return;
+      }
     }
-    #locationList {
-      list-style: none;
-      padding: 0;
+
+    addPoint(location, place.name);
+  });
+
+  document.getElementById("toggleNearby").addEventListener("change", () => {
+    // 状態変化があったときの処理（必要なら何か書く）
+  });
+}
+
+function addPoint(latlng, name = null) {
+  const marker = new google.maps.Marker({
+    position: latlng,
+    map,
+  });
+
+  points.push({ lat: latlng.lat, lng: latlng.lng, name, marker });
+  refreshPointList();
+}
+
+function refreshPointList() {
+  const list = document.getElementById("pointList");
+  list.innerHTML = "";
+
+  points.forEach((pt, i) => {
+    const li = document.createElement("li");
+    li.draggable = true;
+
+    let role = "";
+    if (i === 0) {
+      role = "出発地";
+    } else if (i === points.length - 1) {
+      role = "目的地";
+    } else {
+      role = `経由地${i}`;
     }
-    #locationList li {
-      padding: 4px;
-      margin: 2px;
-      background: #f0f0f0;
-      border: 1px solid #ccc;
-      cursor: move;
-    }
-  </style>
-</head>
-<body>
-  <h1>ルートマップ</h1>
-  <input type="text" id="searchBox" placeholder="地名を検索" />
-  <label>
-    <input type="checkbox" id="proximityToggle" checked /> 近くの場所に制限
-  </label>
-  <button id="toggleTrackingBtn">現在地のリアルタイム追跡を開始</button>
-  <ul id="locationList"></ul>
-  <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/sortablejs@1.14.0/Sortable.min.js"></script>
-  <script>
-    const map = L.map('map').setView([35.681236, 139.767125], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map);
+    const name = pt.name || `手入力地点 (${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)})`;
+    li.textContent = `${role}：${name}`;
 
-    let userLocation = null;
-    let markers = [];
-    let currentLocationMarker = null;
-    let watchId = null;
-    let tracking = false;
-
-    const locationList = document.getElementById('locationList');
-    const searchBox = document.getElementById('searchBox');
-    const proximityToggle = document.getElementById('proximityToggle');
-    const toggleTrackingBtn = document.getElementById('toggleTrackingBtn');
-
-    function updateRoute() {
-      markers.forEach((m) => map.removeLayer(m.marker));
-      markers = [];
-      const items = locationList.querySelectorAll('li');
-      items.forEach((li, index) => {
-        const role = index === 0 ? '出発地' : (index === items.length - 1 ? '目的地' : `経由地${index}`);
-        const color = index === 0 ? 'green' : (index === items.length - 1 ? 'red' : 'blue');
-        const marker = L.marker([li.dataset.lat, li.dataset.lng], {
-          icon: L.icon({
-            iconUrl: `https://maps.google.com/mapfiles/ms/icons/${color}-dot.png`,
-            iconSize: [32, 32],
-            iconAnchor: [16, 32],
-          }),
-        }).addTo(map).bindPopup(`${role}：${li.textContent}`);
-        markers.push({ marker });
+    if (pt.marker) {
+      pt.marker.setLabel({
+        text: `${role}`,
+        color: getMarkerColor(role),
+        fontWeight: "bold",
       });
+      pt.marker.setTitle(`${role}：${name}`);
     }
 
-    function addLocation(name, lat, lng) {
-      const li = document.createElement('li');
-      li.textContent = name;
-      li.dataset.lat = lat;
-      li.dataset.lng = lng;
-      locationList.appendChild(li);
-      updateRoute();
-    }
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "削除";
+    delBtn.onclick = () => {
+      pt.marker.setMap(null);
+      points.splice(i, 1);
+      refreshPointList();
+    };
 
-    new Sortable(locationList, {
-      animation: 150,
-      onUpdate: () => updateRoute(),
-    });
+    li.appendChild(delBtn);
+    list.appendChild(li);
+  });
+}
 
-    function searchLocation(query) {
-      let url = `https://nominatim.openstreetmap.org/search?format=json&q=${query}`;
-      if (proximityToggle.checked && userLocation) {
-        url += `&viewbox=${userLocation.lng - 0.05},${userLocation.lat + 0.05},${userLocation.lng + 0.05},${userLocation.lat - 0.05}&bounded=1`;
-      }
-      fetch(url)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.length > 0) {
-            const place = data[0];
-            addLocation(place.display_name, place.lat, place.lon);
-            map.setView([place.lat, place.lon], 14);
-          } else {
-            alert('場所が見つかりませんでした');
-          }
-        });
-    }
-
-    searchBox.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        searchLocation(searchBox.value);
-      }
-    });
-
-    toggleTrackingBtn.addEventListener('click', () => {
-      if (!tracking) {
-        if (!navigator.geolocation) {
-          alert('現在地追跡はサポートされていません');
-          return;
-        }
-        watchId = navigator.geolocation.watchPosition(
-          (pos) => {
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            userLocation = { lat, lng };
-            if (currentLocationMarker) {
-              currentLocationMarker.setLatLng([lat, lng]);
-            } else {
-              currentLocationMarker = L.circleMarker([lat, lng], {
-                radius: 8,
-                color: 'blue',
-                fillColor: 'lightblue',
-                fillOpacity: 0.8,
-              }).addTo(map).bindPopup('現在地');
-            }
-            map.setView([lat, lng]);
-          },
-          (err) => alert('位置追跡に失敗: ' + err.message),
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-        );
-        toggleTrackingBtn.textContent = '追跡を停止';
-        tracking = true;
-      } else {
-        navigator.geolocation.clearWatch(watchId);
-        if (currentLocationMarker) {
-          map.removeLayer(currentLocationMarker);
-          currentLocationMarker = null;
-        }
-        toggleTrackingBtn.textContent = '現在地のリアルタイム追跡を開始';
-        tracking = false;
-      }
-    });
-
-    navigator.geolocation.getCurrentPosition((pos) => {
-      userLocation = {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-      };
-      map.setView([userLocation.lat, userLocation.lng], 13);
-    });
-  </script>
-</body>
-</html>
+function getMarkerColor(role) {
+  if (role === "出発地") return "green";
+  if (role === "目的地") return "red";
+  return "blue";
+}
