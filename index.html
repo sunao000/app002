@@ -28,6 +28,10 @@
 
     <input id="placeInput" type="text" placeholder="地名・住所を入力" style="width: 300px;" />
     <button id="searchPlaceBtn">地名検索</button>
+    <label>
+      <input type="checkbox" id="nearbyOnlyCheckbox" checked />
+      近くのみ検索（約5km以内）
+    </label>
     <ul id="searchResults"></ul>
 
     <br>
@@ -47,22 +51,17 @@
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    // OpenRouteServiceのAPIキー（自分のものに書き換えてください）
-    const apiKey = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';
+    const apiKey = ''; // OpenRouteServiceのAPIキー
 
-    // 地図初期化（東京駅付近）
     const map = L.map('map').setView([35.681236, 139.767125], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(map);
 
-    // points配列は以下の形で地点を保持するように変更：
-    // { lat: 緯度, lng: 経度, name: 地点名 }
     let points = [];
     let markers = [];
     let currentRoute = null;
 
-    // 要素取得
     const latInput = document.getElementById('latInput');
     const lngInput = document.getElementById('lngInput');
     const addPointBtn = document.getElementById('addPointBtn');
@@ -70,25 +69,20 @@
     const clearPointsBtn = document.getElementById('clearPointsBtn');
     const drawRouteBtn = document.getElementById('drawRouteBtn');
     const profileSelect = document.getElementById('profileSelect');
-
     const placeInput = document.getElementById('placeInput');
     const searchPlaceBtn = document.getElementById('searchPlaceBtn');
     const searchResults = document.getElementById('searchResults');
-
     const pointList = document.getElementById('pointList');
     const openGoogleMapsBtn = document.getElementById('openGoogleMapsBtn');
+    const nearbyOnlyCheckbox = document.getElementById('nearbyOnlyCheckbox');
 
-    // 地点リスト表示更新
     function refreshPointList() {
       pointList.innerHTML = '';
       points.forEach((pt, i) => {
         const li = document.createElement('li');
         li.draggable = true;
-        // 名前を表示（未指定は「手入力地点」）
         li.textContent = pt.name || `手入力地点 (${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)})`;
         li.dataset.index = i;
-
-        // 削除ボタン
         const delBtn = document.createElement('button');
         delBtn.textContent = '削除';
         delBtn.style.marginLeft = '10px';
@@ -100,13 +94,11 @@
           redrawRouteIfExists();
         };
         li.appendChild(delBtn);
-
         pointList.appendChild(li);
       });
       addDragAndDropHandlers();
     }
 
-    // 地点追加（名前もセット可能に）
     function addPoint(lat, lng, name = null) {
       points.push({ lat, lng, name });
       const marker = L.marker([lat, lng]).addTo(map);
@@ -116,7 +108,6 @@
       refreshPointList();
     }
 
-    // 緯度経度だけの手動追加ボタン（名前なし）
     addPointBtn.addEventListener('click', () => {
       const lat = parseFloat(latInput.value);
       const lng = parseFloat(lngInput.value);
@@ -129,19 +120,14 @@
       lngInput.value = '';
     });
 
-    // 現在地取得して追加（名前は「現在地」）
     addCurrentBtn.addEventListener('click', () => {
       if (!navigator.geolocation) {
         alert('現在地取得はサポートされていません');
         return;
       }
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          addPoint(pos.coords.latitude, pos.coords.longitude, '現在地');
-        },
-        (err) => {
-          alert('現在地取得に失敗しました: ' + err.message);
-        }
+        (pos) => addPoint(pos.coords.latitude, pos.coords.longitude, '現在地'),
+        (err) => alert('現在地取得に失敗しました: ' + err.message)
       );
     });
 
@@ -162,7 +148,6 @@
       }
     }
 
-    // ルート表示処理
     drawRouteBtn.addEventListener('click', () => {
       if (points.length < 2) {
         alert('ルート表示には2地点以上の登録が必要です');
@@ -203,27 +188,18 @@
         });
     });
 
-    // Google Mapsで開く処理
     openGoogleMapsBtn.addEventListener('click', () => {
-  if (points.length < 2) {
-    alert('地点が2つ以上必要です');
-    return;
-  }
+      if (points.length < 2) {
+        alert('地点が2つ以上必要です');
+        return;
+      }
+      const urlPoints = points.map(pt => encodeURIComponent(pt.name || `${pt.lat},${pt.lng}`)).join('/');
+      const gmapUrl = `https://www.google.com/maps/dir/${urlPoints}`;
+      window.open(gmapUrl, '_blank');
+    });
 
-  // 順序通りに地名 or 緯度経度をURLエンコードして配列にする
-  const urlPoints = points
-    .map(pt => encodeURIComponent(pt.name || `${pt.lat},${pt.lng}`))
-    .join('/');
-
-  const gmapUrl = `https://www.google.com/maps/dir/${urlPoints}`;
-  window.open(gmapUrl, '_blank');
-});
-
-
-
-    // 指定緯度経度を中心にkm単位のviewbox作成（Nominatim用）
     function createViewbox(lat, lng, km = 5) {
-      const latDiff = km / 111; // 緯度は約111kmで1度
+      const latDiff = km / 111;
       const lngDiff = km / (111 * Math.cos(lat * Math.PI / 180));
       const left = lng - lngDiff;
       const right = lng + lngDiff;
@@ -232,7 +208,6 @@
       return `&viewbox=${left},${top},${right},${bottom}&bounded=1`;
     }
 
-    // Nominatimを使った地名検索
     searchPlaceBtn.addEventListener('click', () => {
       const query = placeInput.value.trim();
       if (!query) {
@@ -240,9 +215,10 @@
         return;
       }
 
+      const nearbyOnly = nearbyOnlyCheckbox.checked;
       let viewboxParam = '';
-      if (points.length > 0) {
-        const center = points[points.length - 1]; // 最後に追加した地点を中心に絞り込み
+      if (nearbyOnly && points.length > 0) {
+        const center = points[points.length - 1];
         viewboxParam = createViewbox(center.lat, center.lng, 5);
       }
 
@@ -258,7 +234,6 @@
             const li = document.createElement('li');
             li.textContent = `${item.display_name} (緯度: ${item.lat}, 経度: ${item.lon})`;
             li.onclick = () => {
-              // 検索結果の名前もセットして追加
               addPoint(parseFloat(item.lat), parseFloat(item.lon), item.display_name);
               searchResults.innerHTML = '';
               placeInput.value = '';
@@ -272,7 +247,6 @@
         });
     });
 
-    // OpenRouteServiceのPolylineデコード関数
     function decodePolyline(encoded) {
       let points = [];
       let index = 0, len = encoded.length;
@@ -303,7 +277,6 @@
       return points;
     }
 
-    // ドラッグ＆ドロップで地点リストの順序入れ替え
     function addDragAndDropHandlers() {
       let dragSrcEl = null;
 
@@ -325,22 +298,17 @@
         if (dragSrcEl !== this) {
           const fromIndex = parseInt(dragSrcEl.dataset.index);
           const toIndex = parseInt(this.dataset.index);
-
-          // 配列の入れ替え
           const movedPoint = points.splice(fromIndex, 1)[0];
           points.splice(toIndex, 0, movedPoint);
-
-          // マーカーも入れ替え
           const movedMarker = markers.splice(fromIndex, 1)[0];
           markers.splice(toIndex, 0, movedMarker);
-
           refreshPointList();
           redrawRouteIfExists();
         }
         return false;
       }
 
-      function handleDragEnd(e) {
+      function handleDragEnd() {
         this.style.opacity = '1';
       }
 
