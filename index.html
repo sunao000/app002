@@ -20,7 +20,7 @@
     <input id="latInput" type="number" placeholder="緯度" step="0.000001" />
     <input id="lngInput" type="number" placeholder="経度" step="0.000001" />
     <button id="addPointBtn">地点を追加</button>
-    <button id="addCurrentBtn">現在地を追加</button>
+    <button id="addCurrentBtn">現在地を追加（登録地点リストへ）</button>
     <button id="clearPointsBtn">地点クリア</button>
     <button id="drawRouteBtn">ルート表示</button>
     <button id="openGoogleMapsBtn">Google Mapsで開く</button>
@@ -39,6 +39,9 @@
       <option value="driving-car" selected>車</option>
       <option value="cycling-regular">自転車</option>
     </select>
+
+    <br><br>
+    <label><input type="checkbox" id="toggleRealTime" checked> リアルタイム現在地表示ON/OFF</label>
 
     <h3>登録地点リスト（ドラッグで並び替え可能）</h3>
     <ul id="pointList"></ul>
@@ -81,6 +84,8 @@
 
     const pointList = document.getElementById('pointList');
     const openGoogleMapsBtn = document.getElementById('openGoogleMapsBtn');
+
+    const toggleRealTimeCheckbox = document.getElementById('toggleRealTime');
 
     // 登録地点リスト表示更新（役割+地名表示）
     function refreshPointList() {
@@ -139,7 +144,7 @@
       lngInput.value = '';
     });
 
-    // 現在地を追加（リアルタイムマーカーは別管理）
+    // 現在地を登録地点リストに追加
     addCurrentBtn.addEventListener('click', () => {
       if (!navigator.geolocation) {
         alert('現在地取得はサポートされていません');
@@ -249,69 +254,68 @@
         return;
       }
 
-      let viewboxParam = '';
-      if (limitNearbyCheckbox.checked && points.length > 0) {
-        const center = points[points.length - 1];
-        viewboxParam = createViewbox(center.lat, center.lng, 5);
+      let viewbox = '';
+      if (limitNearbyCheckbox.checked && realTimeMarker) {
+        const pos = realTimeMarker.getLatLng();
+        viewbox = createViewbox(pos.lat, pos.lng, 5);
       }
 
-      fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}${viewboxParam}`)
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json${viewbox}`;
+      fetch(url)
         .then(res => res.json())
-        .then(results => {
+        .then(data => {
           searchResults.innerHTML = '';
-          if (results.length === 0) {
-            searchResults.textContent = '該当する場所がありませんでした。';
+          if (data.length === 0) {
+            searchResults.innerHTML = '<li>該当なし</li>';
             return;
           }
-          results.forEach(item => {
+          data.forEach(item => {
             const li = document.createElement('li');
-            li.textContent = `${item.display_name} (緯度: ${item.lat}, 経度: ${item.lon})`;
-            li.onclick = () => {
+            li.textContent = item.display_name;
+            li.dataset.lat = item.lat;
+            li.dataset.lon = item.lon;
+            li.addEventListener('click', () => {
               addPoint(parseFloat(item.lat), parseFloat(item.lon), item.display_name);
               searchResults.innerHTML = '';
               placeInput.value = '';
-            };
+            });
             searchResults.appendChild(li);
           });
         })
-        .catch(err => {
-          console.error(err);
-          alert('地名検索に失敗しました');
+        .catch(() => {
+          alert('検索に失敗しました');
         });
     });
 
-    // OpenRouteServiceのPolylineデコード
-    function decodePolyline(encoded) {
-      let points = [];
-      let index = 0, len = encoded.length;
-      let lat = 0, lng = 0;
-
-      while (index < len) {
+    // ポリラインデコード（Googleのencoded polyline形式）
+    function decodePolyline(str) {
+      let index = 0, lat = 0, lng = 0, coordinates = [];
+      while (index < str.length) {
         let b, shift = 0, result = 0;
         do {
-          b = encoded.charCodeAt(index++) - 63;
+          b = str.charCodeAt(index++) - 63;
           result |= (b & 0x1f) << shift;
           shift += 5;
         } while (b >= 0x20);
-        let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lat += dlat;
+        const deltaLat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lat += deltaLat;
 
         shift = 0;
         result = 0;
         do {
-          b = encoded.charCodeAt(index++) - 63;
+          b = str.charCodeAt(index++) - 63;
           result |= (b & 0x1f) << shift;
           shift += 5;
         } while (b >= 0x20);
-        let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lng += dlng;
+        const deltaLng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lng += deltaLng;
 
-        points.push([lat / 1e5, lng / 1e5]);
+        coordinates.push([lat / 1e5, lng / 1e5]);
       }
-      return points;
+      return coordinates;
     }
 
-    // --- ドラッグ並び替え実装 ---
+    // --- ドラッグ並び替え ---
     function addDragAndDropHandlers() {
       let dragSrcEl = null;
 
@@ -338,7 +342,7 @@
           const movedPoint = points.splice(fromIndex, 1)[0];
           points.splice(toIndex, 0, movedPoint);
 
-          // マーカーも入れ替え
+          // マーカー入れ替え
           const movedMarker = markers.splice(fromIndex, 1)[0];
           markers.splice(toIndex, 0, movedMarker);
 
@@ -348,9 +352,7 @@
         return false;
       }
 
-      function handleDragEnd(e) {
-        // 何もしない
-      }
+      function handleDragEnd(e) {}
 
       Array.from(pointList.children).forEach(item => {
         item.addEventListener('dragstart', handleDragStart, false);
@@ -360,15 +362,24 @@
       });
     }
 
-    // --- 現在地のリアルタイム更新 ---
+    // --- リアルタイム現在地追跡 ---
     function startRealTimeTracking() {
       if (!navigator.geolocation) {
         alert('リアルタイム位置情報はサポートされていません');
         return;
       }
-
       if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+
+      if (!toggleRealTimeCheckbox.checked) {
+        // リアルタイム表示OFF時、マーカー消す
+        if (realTimeMarker) {
+          map.removeLayer(realTimeMarker);
+          realTimeMarker = null;
+        }
+        return;
       }
 
       watchId = navigator.geolocation.watchPosition(
@@ -377,12 +388,14 @@
           const lng = pos.coords.longitude;
 
           if (!realTimeMarker) {
-            realTimeMarker = L.marker([lat, lng], { icon: L.icon({ 
-              iconUrl: 'https://cdn-icons-png.flaticon.com/512/64/64113.png',
-              iconSize: [30, 30],
-              iconAnchor: [15, 30],
-              popupAnchor: [0, -30]
-            }) }).addTo(map);
+            realTimeMarker = L.marker([lat, lng], {
+              icon: L.icon({
+                iconUrl: 'https://cdn-icons-png.flaticon.com/512/64/64113.png',
+                iconSize: [30, 30],
+                iconAnchor: [15, 30],
+                popupAnchor: [0, -30]
+              })
+            }).addTo(map);
             realTimeMarker.bindPopup('リアルタイム現在地').openPopup();
             map.setView([lat, lng], 15);
           } else {
@@ -396,7 +409,12 @@
       );
     }
 
-    // ページロード時にリアルタイム現在地追跡開始
+    // ON/OFF切り替え時の挙動
+    toggleRealTimeCheckbox.addEventListener('change', () => {
+      startRealTimeTracking();
+    });
+
+    // ページロード時にリアルタイム追跡開始（ONが初期値）
     startRealTimeTracking();
 
   </script>
