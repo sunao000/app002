@@ -2,35 +2,58 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>ルート検索デモ</title>
+  <title>ルート検索と地図表示</title>
   <style>
+    #map {
+      width: 100%;
+      height: 500px;
+      margin-top: 10px;
+    }
     #locationList li {
       margin: 5px 0;
     }
   </style>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+e2GgfHkSDBYzrY9F7YAWp6V8sFZpMQuzH8mG0kEQ="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1jRVvXCn/7nVvP7jN1cUlACjOqsnnt50eH5/Tr1s="
+    crossorigin=""
+  ></script>
 </head>
 <body>
-  <h1>ルート検索</h1>
+  <h1>ルート検索と地図表示</h1>
   <label>
     <input type="checkbox" id="locationFilterToggle" checked />
     近くの場所のみに制限
-  </label>
-  <br /><br />
+  </label><br /><br />
   <input id="placeInput" type="text" placeholder="地名を入力" />
   <button onclick="searchPlace()">検索して追加</button>
   <button onclick="addCurrentLocation()">現在地を追加</button>
+  <button onclick="showRoute()">ルート検索</button>
   <ul id="locationList"></ul>
+  <div id="map"></div>
 
   <script>
     let locationList = [];
     let locationFilterEnabled = true;
     let currentPosition = null;
+    let map = L.map("map").setView([35.681236, 139.767125], 10);
+    let markers = [];
+    let routePolyline = null;
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
+    }).addTo(map);
 
     document.getElementById("locationFilterToggle").addEventListener("change", (e) => {
       locationFilterEnabled = e.target.checked;
     });
 
-    // リアルタイム位置更新
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         (position) => {
@@ -46,14 +69,9 @@
       );
     }
 
-    function getPlaceFromInput() {
-      return document.getElementById("placeInput").value;
-    }
-
     async function searchPlace() {
-      const place = getPlaceFromInput();
+      const place = document.getElementById("placeInput").value;
       if (!place) return;
-
       let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json`;
 
       if (locationFilterEnabled && currentPosition) {
@@ -65,7 +83,7 @@
 
       if (results.length > 0) {
         const first = results[0];
-        addLocation({ name: first.display_name, lat: first.lat, lng: first.lon });
+        addLocation({ name: first.display_name, lat: parseFloat(first.lat), lng: parseFloat(first.lon) });
       } else {
         alert("地名が見つかりませんでした");
       }
@@ -78,17 +96,19 @@
       }
 
       const name = `現在地（${currentPosition.lat.toFixed(5)}, ${currentPosition.lng.toFixed(5)}）`;
-      addLocation({ name: name, lat: currentPosition.lat, lng: currentPosition.lng });
+      addLocation({ name, lat: currentPosition.lat, lng: currentPosition.lng });
     }
 
-    function addLocation(location) {
-      locationList.push(location);
+    function addLocation(loc) {
+      locationList.push(loc);
       renderLocationList();
+      updateMapMarkers();
     }
 
     function removeLocation(index) {
       locationList.splice(index, 1);
       renderLocationList();
+      updateMapMarkers();
     }
 
     function renderLocationList() {
@@ -96,15 +116,41 @@
       ul.innerHTML = "";
 
       locationList.forEach((loc, index) => {
-        const li = document.createElement("li");
-
         let label = "経由地";
         if (index === 0) label = "出発地";
         else if (index === locationList.length - 1) label = "目的地";
 
+        const li = document.createElement("li");
         li.innerHTML = `${label}: ${loc.name} <button onclick="removeLocation(${index})">削除</button>`;
         ul.appendChild(li);
       });
+    }
+
+    function updateMapMarkers() {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+      locationList.forEach(loc => {
+        const marker = L.marker([loc.lat, loc.lng]).addTo(map).bindPopup(loc.name);
+        markers.push(marker);
+      });
+      if (locationList.length > 0) {
+        map.setView([locationList[0].lat, locationList[0].lng], 12);
+      }
+    }
+
+    function showRoute() {
+      if (routePolyline) {
+        map.removeLayer(routePolyline);
+      }
+
+      if (locationList.length < 2) {
+        alert("ルート検索には最低2地点が必要です。");
+        return;
+      }
+
+      const latlngs = locationList.map(loc => [loc.lat, loc.lng]);
+      routePolyline = L.polyline(latlngs, { color: 'blue' }).addTo(map);
+      map.fitBounds(routePolyline.getBounds());
     }
   </script>
 </body>
