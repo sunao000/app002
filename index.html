@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>ルート検索と地図表示</title>
+  <title>ルート検索と地図表示（車・徒歩切替）</title>
   <style>
     #map {
       width: 100%;
@@ -11,6 +11,9 @@
     }
     #locationList li {
       margin: 5px 0;
+    }
+    label {
+      margin-right: 10px;
     }
   </style>
   <link
@@ -26,15 +29,22 @@
   ></script>
 </head>
 <body>
-  <h1>ルート検索と地図表示</h1>
+  <h1>ルート検索と地図表示（車・徒歩切替）</h1>
+  
   <label>
     <input type="checkbox" id="locationFilterToggle" checked />
     近くの場所のみに制限
   </label><br /><br />
+  
   <input id="placeInput" type="text" placeholder="地名を入力" />
   <button onclick="searchPlace()">検索して追加</button>
-  <button onclick="addCurrentLocation()">現在地を追加</button>
+  <button onclick="addCurrentLocation()">現在地を追加</button><br><br>
+
+  <!-- 車 / 徒歩 切替 -->
+  <label><input type="radio" name="travelMode" value="driving-car" checked> 車</label>
+  <label><input type="radio" name="travelMode" value="foot-walking"> 徒歩</label>
   <button onclick="showRoute()">ルート検索</button>
+
   <ul id="locationList"></ul>
   <div id="map"></div>
 
@@ -46,17 +56,17 @@
     let markers = [];
     let routePolyline = null;
 
-    // 地図タイルを追加
+    // OpenRouteService APIキー（必ず自分のキーに差し替えてください）
+    const ORS_API_KEY = "5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9";
+
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
     }).addTo(map);
 
-    // 近くの場所のみに制限切り替え
     document.getElementById("locationFilterToggle").addEventListener("change", (e) => {
       locationFilterEnabled = e.target.checked;
     });
 
-    // 現在地のリアルタイム取得
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         (position) => {
@@ -72,7 +82,6 @@
       );
     }
 
-    // 地名を検索して追加
     async function searchPlace() {
       const place = document.getElementById("placeInput").value;
       if (!place) return;
@@ -93,32 +102,27 @@
       }
     }
 
-    // 現在地を地点として追加
     function addCurrentLocation() {
       if (!currentPosition) {
         alert("現在地がまだ取得されていません。少し待ってください。");
         return;
       }
-
       const name = `現在地（${currentPosition.lat.toFixed(5)}, ${currentPosition.lng.toFixed(5)}）`;
       addLocation({ name, lat: currentPosition.lat, lng: currentPosition.lng });
     }
 
-    // 地点をリストに追加
     function addLocation(loc) {
       locationList.push(loc);
       renderLocationList();
       updateMapMarkers();
     }
 
-    // 地点を削除
     function removeLocation(index) {
       locationList.splice(index, 1);
       renderLocationList();
       updateMapMarkers();
     }
 
-    // 地点リストを表示（出発地・経由地・目的地）
     function renderLocationList() {
       const ul = document.getElementById("locationList");
       ul.innerHTML = "";
@@ -134,7 +138,6 @@
       });
     }
 
-    // 地図上のマーカー更新
     function updateMapMarkers() {
       markers.forEach(m => map.removeLayer(m));
       markers = [];
@@ -147,10 +150,10 @@
       }
     }
 
-    // 地図にルート線を表示
-    function showRoute() {
+    async function showRoute() {
       if (routePolyline) {
         map.removeLayer(routePolyline);
+        routePolyline = null;
       }
 
       if (locationList.length < 2) {
@@ -158,9 +161,42 @@
         return;
       }
 
-      const latlngs = locationList.map(loc => [loc.lat, loc.lng]);
-      routePolyline = L.polyline(latlngs, { color: 'blue' }).addTo(map);
-      map.fitBounds(routePolyline.getBounds());
+      // 選択された移動モードを取得
+      const selectedMode = document.querySelector('input[name="travelMode"]:checked').value;
+
+      // OpenRouteService API用に座標配列作成（[lng, lat]）
+      const coordinates = locationList.map(loc => [loc.lng, loc.lat]);
+
+      // APIリクエストのペイロード作成
+      const body = {
+        coordinates: coordinates,
+      };
+
+      try {
+        const res = await fetch(`https://api.openrouteservice.org/v2/directions/${selectedMode}/geojson`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": ORS_API_KEY,
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          throw new Error(`APIエラー: ${res.status} ${res.statusText}`);
+        }
+
+        const data = await res.json();
+
+        // GeoJSONの座標をLeaflet用に変換（[lat, lng]）
+        const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
+
+        // ルートを地図に描画
+        routePolyline = L.polyline(coords, { color: "blue" }).addTo(map);
+        map.fitBounds(routePolyline.getBounds());
+      } catch (err) {
+        alert("ルート検索に失敗しました: " + err.message);
+      }
     }
   </script>
 </body>
