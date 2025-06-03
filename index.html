@@ -243,12 +243,16 @@
             const li = document.createElement('li');
             li.textContent = place.display_name;
             li.onclick = () => {
-              latInput.value = place.lat;
-              lngInput.value = place.lon;
-              placeInput.value = place.display_name;
-              searchResults.innerHTML = '';
-              map.setView([place.lat, place.lon], 14);
-            };
+            const lat = parseFloat(place.lat);
+            const lng = parseFloat(place.lon);
+            addPoint(lat, lng, place.display_name);  // ← ここが追加！
+            latInput.value = lat;
+            lngInput.value = lng;
+            placeInput.value = place.display_name;
+            searchResults.innerHTML = '';
+            map.setView([lat, lng], 14);
+          };
+
             searchResults.appendChild(li);
           });
         })
