@@ -30,6 +30,10 @@
   <label>
     <input type="checkbox" id="locationFilterToggle" checked />
     近くの場所のみに制限
+  </label>
+  <label>
+    <input type="checkbox" id="useLiveLocationToggle" checked />
+    現在地のリアルタイム更新を使用
   </label><br /><br />
   <input id="placeInput" type="text" placeholder="地名を入力" />
   <button onclick="searchPlace()">検索して追加</button>
@@ -41,6 +45,7 @@
   <script>
     let locationList = [];
     let locationFilterEnabled = true;
+    let useLiveLocation = true;
     let currentPosition = null;
     let map = L.map("map").setView([35.681236, 139.767125], 10);
     let markers = [];
@@ -54,13 +59,19 @@
       locationFilterEnabled = e.target.checked;
     });
 
+    document.getElementById("useLiveLocationToggle").addEventListener("change", (e) => {
+      useLiveLocation = e.target.checked;
+    });
+
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         (position) => {
-          currentPosition = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
+          if (useLiveLocation) {
+            currentPosition = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            };
+          }
         },
         (err) => {
           console.error("位置情報の取得に失敗:", err);
@@ -94,7 +105,6 @@
         alert("現在地がまだ取得されていません。少し待ってください。");
         return;
       }
-
       const name = `現在地（${currentPosition.lat.toFixed(5)}, ${currentPosition.lng.toFixed(5)}）`;
       addLocation({ name, lat: currentPosition.lat, lng: currentPosition.lng });
     }
@@ -114,12 +124,10 @@
     function renderLocationList() {
       const ul = document.getElementById("locationList");
       ul.innerHTML = "";
-
       locationList.forEach((loc, index) => {
         let label = "経由地";
         if (index === 0) label = "出発地";
         else if (index === locationList.length - 1) label = "目的地";
-
         const li = document.createElement("li");
         li.innerHTML = `${label}: ${loc.name} <button onclick="removeLocation(${index})">削除</button>`;
         ul.appendChild(li);
@@ -142,12 +150,10 @@
       if (routePolyline) {
         map.removeLayer(routePolyline);
       }
-
       if (locationList.length < 2) {
         alert("ルート検索には最低2地点が必要です。");
         return;
       }
-
       const latlngs = locationList.map(loc => [loc.lat, loc.lng]);
       routePolyline = L.polyline(latlngs, { color: 'blue' }).addTo(map);
       map.fitBounds(routePolyline.getBounds());
