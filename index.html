@@ -30,10 +30,6 @@
   <label>
     <input type="checkbox" id="locationFilterToggle" checked />
     近くの場所のみに制限
-  </label>
-  <label>
-    <input type="checkbox" id="useLiveLocationToggle" checked />
-    現在地のリアルタイム更新を使用
   </label><br /><br />
   <input id="placeInput" type="text" placeholder="地名を入力" />
   <button onclick="searchPlace()">検索して追加</button>
@@ -45,33 +41,29 @@
   <script>
     let locationList = [];
     let locationFilterEnabled = true;
-    let useLiveLocation = true;
     let currentPosition = null;
     let map = L.map("map").setView([35.681236, 139.767125], 10);
     let markers = [];
     let routePolyline = null;
 
+    // 地図タイルを追加
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
     }).addTo(map);
 
+    // 近くの場所のみに制限切り替え
     document.getElementById("locationFilterToggle").addEventListener("change", (e) => {
       locationFilterEnabled = e.target.checked;
     });
 
-    document.getElementById("useLiveLocationToggle").addEventListener("change", (e) => {
-      useLiveLocation = e.target.checked;
-    });
-
+    // 現在地のリアルタイム取得
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(
         (position) => {
-          if (useLiveLocation) {
-            currentPosition = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            };
-          }
+          currentPosition = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
         },
         (err) => {
           console.error("位置情報の取得に失敗:", err);
@@ -80,6 +72,7 @@
       );
     }
 
+    // 地名を検索して追加
     async function searchPlace() {
       const place = document.getElementById("placeInput").value;
       if (!place) return;
@@ -100,40 +93,48 @@
       }
     }
 
+    // 現在地を地点として追加
     function addCurrentLocation() {
       if (!currentPosition) {
         alert("現在地がまだ取得されていません。少し待ってください。");
         return;
       }
+
       const name = `現在地（${currentPosition.lat.toFixed(5)}, ${currentPosition.lng.toFixed(5)}）`;
       addLocation({ name, lat: currentPosition.lat, lng: currentPosition.lng });
     }
 
+    // 地点をリストに追加
     function addLocation(loc) {
       locationList.push(loc);
       renderLocationList();
       updateMapMarkers();
     }
 
+    // 地点を削除
     function removeLocation(index) {
       locationList.splice(index, 1);
       renderLocationList();
       updateMapMarkers();
     }
 
+    // 地点リストを表示（出発地・経由地・目的地）
     function renderLocationList() {
       const ul = document.getElementById("locationList");
       ul.innerHTML = "";
+
       locationList.forEach((loc, index) => {
         let label = "経由地";
         if (index === 0) label = "出発地";
         else if (index === locationList.length - 1) label = "目的地";
+
         const li = document.createElement("li");
         li.innerHTML = `${label}: ${loc.name} <button onclick="removeLocation(${index})">削除</button>`;
         ul.appendChild(li);
       });
     }
 
+    // 地図上のマーカー更新
     function updateMapMarkers() {
       markers.forEach(m => map.removeLayer(m));
       markers = [];
@@ -146,14 +147,17 @@
       }
     }
 
+    // 地図にルート線を表示
     function showRoute() {
       if (routePolyline) {
         map.removeLayer(routePolyline);
       }
+
       if (locationList.length < 2) {
         alert("ルート検索には最低2地点が必要です。");
         return;
       }
+
       const latlngs = locationList.map(loc => [loc.lat, loc.lng]);
       routePolyline = L.polyline(latlngs, { color: 'blue' }).addTo(map);
       map.fitBounds(routePolyline.getBounds());
