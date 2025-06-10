@@ -261,29 +261,29 @@
     });
 
     function fetchNearbyPlaces(url) {
-      fetch(url)
-        .then(res => res.json())
-        .then(data => {
+  fetch(url)
+    .then(res => res.json())
+    .then(data => {
+      searchResults.innerHTML = '';
+      if (!data.length) return searchResults.textContent = '該当なし';
+      data.forEach(place => {
+        const li = document.createElement('li');
+        li.textContent = place.display_name;
+        li.onclick = () => {
+          const lat = parseFloat(place.lat);
+          const lng = parseFloat(place.lon);
+          addPoint(lat, lng, place.display_name); // ✅ 登録地点とマーカーに追加
+          latInput.value = lat;
+          lngInput.value = lng;
+          placeInput.value = place.display_name;
           searchResults.innerHTML = '';
-          if (!data.length) return searchResults.textContent = '該当なし';
-          data.forEach(place => {
-            const li = document.createElement('li');
-            li.textContent = place.display_name;
-            li.onclick = () => {
-              const lat = parseFloat(place.lat);
-              const lng = parseFloat(place.lon);
-              addPoint(lat, lng, place.display_name);
-              latInput.value = lat;
-              lngInput.value = lng;
-              placeInput.value = place.display_name;
-              searchResults.innerHTML = '';
-              map.setView([lat, lng], 14);
-            };
-            searchResults.appendChild(li);
-          });
-        })
-        .catch(err => searchResults.textContent = '検索エラー: ' + err.message);
-    }
+        };
+        searchResults.appendChild(li);
+      });
+    })
+    .catch(err => searchResults.textContent = '検索エラー: ' + err.message);
+}
+
 
     function addDragAndDropHandlers() {
       let dragSrcEl = null;
