@@ -86,9 +86,37 @@
       placeInput.focus();
     });
 
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const iconStart = new L.Icon({
+      iconUrl: 'https://maps.gstatic.com/mapfiles/ms2/micons/green-dot.png',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+      popupAnchor: [0, -32]
+    });
+
+    const iconVia = new L.Icon({
+      iconUrl: 'https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+      popupAnchor: [0, -32]
+    });
+
+    const iconEnd = new L.Icon({
+      iconUrl: 'https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+      popupAnchor: [0, -32]
+    });
+
     function addPoint(lat, lng, name = null) {
       points.push({ lat, lng, name });
-      const marker = L.marker([lat, lng]).addTo(map);
+      const index = points.length - 1;
+      let icon = iconVia;
+      if (index === 0) icon = iconStart;
+      else if (index === points.length - 1 && points.length > 1) icon = iconEnd;
+
+      const marker = L.marker([lat, lng], { icon }).addTo(map);
       marker.bindPopup(name || `緯度:${lat.toFixed(6)}, 経度:${lng.toFixed(6)}`).openPopup();
       markers.push(marker);
       map.setView([lat, lng], 14);
@@ -97,15 +125,13 @@
 
     function refreshPointList() {
       pointList.innerHTML = '';
-      points.forEach((pt, i) => {
-        const li = document.createElement('li');
-        const span = document.createElement('span');
-        span.className = 'role-name';
-        span.textContent = pt.name || `地点 (${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)})`;
-        li.appendChild(span);
-        pointList.appendChild(li);
+      markers.forEach((m, i) => {
+        if (!points[i]) return;
+        let icon = iconVia;
+        if (i === 0) icon = iconStart;
+        else if (i === points.length - 1) icon = iconEnd;
+        m.setIcon(icon);
       });
-    }
 
     function fetchNearbyPlaces(url) {
       fetch(url)
