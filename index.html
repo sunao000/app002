@@ -12,13 +12,13 @@
     #pointList { list-style: none; padding-left: 0; }
     #pointList li { padding: 4px; border: 1px solid #ccc; margin-bottom: 4px; background: #fafafa; cursor: move; display: flex; justify-content: space-between; align-items: center; }
     #pointList li span.role-name { flex-grow: 1; }
+    #clearPlaceInputBtn { margin-left: 4px; }
   </style>
 </head>
 <body>
   <h2>ルート案内アプリ</h2>
 
   <div id="controls">
-    <!-- 緯度経度手入力 -->
     <input id="latInput" type="number" placeholder="緯度" step="0.000001" />
     <input id="lngInput" type="number" placeholder="経度" step="0.000001" />
     <button id="addPointBtn">地点を追加</button>
@@ -30,15 +30,14 @@
 
     <br><br>
 
-    <!-- 地名検索 -->
     <input id="placeInput" type="text" placeholder="地名・住所を入力" style="width: 300px;" />
+    <button id="clearPlaceInputBtn">×</button> <!-- ★追加 -->
     <button id="searchPlaceBtn">地名検索</button>
     <label><input type="checkbox" id="nearbyOnlyCheckbox" /> 近くの場所のみ検索</label>
     <ul id="searchResults"></ul>
 
     <br>
 
-    <!-- 移動手段 -->
     <label for="profileSelect">移動手段:</label>
     <select id="profileSelect">
       <option value="foot-walking">徒歩</option>
@@ -50,6 +49,7 @@
     <ul id="pointList"></ul>
   </div>
 
+  <div id="routeInfo" style="margin-top: 10px; font-weight: bold;"></div>
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -72,11 +72,19 @@
     const drawRouteBtn = document.getElementById('drawRouteBtn');
     const profileSelect = document.getElementById('profileSelect');
     const placeInput = document.getElementById('placeInput');
+    const clearPlaceInputBtn = document.getElementById('clearPlaceInputBtn'); // ★追加
     const searchPlaceBtn = document.getElementById('searchPlaceBtn');
     const searchResults = document.getElementById('searchResults');
     const pointList = document.getElementById('pointList');
     const openGoogleMapsBtn = document.getElementById('openGoogleMapsBtn');
     const nearbyOnlyCheckbox = document.getElementById('nearbyOnlyCheckbox');
+    const routeInfo = document.getElementById('routeInfo');
+
+    // ★クリアボタンの機能追加
+    clearPlaceInputBtn.addEventListener('click', () => {
+      placeInput.value = '';
+      placeInput.focus();
+    });
 
     function refreshPointList() {
       pointList.innerHTML = '';
@@ -175,6 +183,7 @@
         map.removeLayer(currentRoute);
         currentRoute = null;
       }
+      routeInfo.textContent = '';
       refreshPointList();
     });
 
@@ -197,6 +206,11 @@
           if (currentRoute) map.removeLayer(currentRoute);
           currentRoute = L.geoJSON(data, { style: { color: 'blue', weight: 5 } }).addTo(map);
           map.fitBounds(currentRoute.getBounds());
+
+          const summary = data.features[0].properties.summary;
+          const distanceKm = (summary.distance / 1000).toFixed(2);
+          const durationMin = (summary.duration / 60).toFixed(1);
+          routeInfo.textContent = `距離: ${distanceKm} km　所要時間: 約 ${durationMin} 分`;
         })
         .catch(err => alert('ルート取得エラー: ' + err.message));
     });
@@ -243,16 +257,15 @@
             const li = document.createElement('li');
             li.textContent = place.display_name;
             li.onclick = () => {
-            const lat = parseFloat(place.lat);
-            const lng = parseFloat(place.lon);
-            addPoint(lat, lng, place.display_name);  // ← ここが追加！
-            latInput.value = lat;
-            lngInput.value = lng;
-            placeInput.value = place.display_name;
-            searchResults.innerHTML = '';
-            map.setView([lat, lng], 14);
-          };
-
+              const lat = parseFloat(place.lat);
+              const lng = parseFloat(place.lon);
+              addPoint(lat, lng, place.display_name);
+              latInput.value = lat;
+              lngInput.value = lng;
+              placeInput.value = place.display_name;
+              searchResults.innerHTML = '';
+              map.setView([lat, lng], 14);
+            };
             searchResults.appendChild(li);
           });
         })
