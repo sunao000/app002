@@ -84,17 +84,30 @@
     }
 
     function refreshPointList() {
-      pointList.innerHTML = '';
-      points.forEach((p, i) => {
-        const li = document.createElement('li');
-        li.className = 'draggable';
-        const span = document.createElement('span');
-        span.className = 'role-name';
-        span.textContent = (i === 0 ? '出発地: ' : (i === points.length - 1 ? '目的地: ' : `経由地${i}: `)) + (p.name || `(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)})`);
-        li.appendChild(span);
-        pointList.appendChild(li);
-      });
-    }
+  pointList.innerHTML = '';
+  points.forEach((p, i) => {
+    const li = document.createElement('li');
+    li.className = 'draggable';
+
+    const span = document.createElement('span');
+    span.className = 'role-name';
+    span.textContent = (i === 0 ? '出発地: ' : (i === points.length - 1 ? '目的地: ' : `経由地${i}: `)) + (p.name || `(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)})`);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '×';
+    removeBtn.style.marginLeft = '8px';
+    removeBtn.onclick = () => {
+      points.splice(i, 1);
+      updateMarkers();
+      refreshPointList();
+    };
+
+    li.appendChild(span);
+    li.appendChild(removeBtn);
+    pointList.appendChild(li);
+  });
+}
+
 
     new Sortable(pointList, {
   animation: 150,
