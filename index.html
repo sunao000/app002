@@ -370,51 +370,30 @@
     });
 
     toggleRealTimeBtn.addEventListener('click', () => {
-      if (watchId) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-        if (realTimeMarker) map.removeLayer(realTimeMarker);
-        toggleRealTimeBtn.textContent = 'リアルタイム現在地更新 OFF';
-        return;
-      }
-      if (!navigator.geolocation) return alert('現在地取得未対応');
-      watchId = navigator.geolocation.watchPosition(pos => {
-        const { latitude, longitude } = pos.coords;
-        if (!realTimeMarker) {
-          realTimeMarker = L.marker([latitude, longitude]).addTo(map).bindPopup('リアルタイム現在地');
-          addPoint(latitude, longitude, 'リアルタイム現在地');
-        } else {
-          realTimeMarker.setLatLng([latitude, longitude]);
-        }
-        map.setView([latitude, longitude], 14);
-        if (lastLatLng) {
-          const d = getDistance(lastLatLng.lat, lastLatLng.lng, latitude, longitude);
-          if (d >= AUTO_REDRAW_DISTANCE) drawRoute();
-        }
-        lastLatLng = { lat: latitude, lng: longitude };
-      }, err => alert('リアルタイム位置取得失敗: ' + err.message), {
-        enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
-      });
-      toggleRealTimeBtn.textContent = 'リアルタイム現在地更新 ON';
-    });
-  </script>
-</body>
-</html>
-de, 'リアルタイム現在地');
-        } else {
-          realTimeMarker.setLatLng([latitude, longitude]);
-        }
-        map.setView([latitude, longitude], 14);
-        if (lastLatLng) {
-          const d = getDistance(lastLatLng.lat, lastLatLng.lng, latitude, longitude);
-          if (d >= AUTO_REDRAW_DISTANCE) drawRoute();
-        }
-        lastLatLng = { lat: latitude, lng: longitude };
-      }, err => alert('リアルタイム位置取得失敗: ' + err.message), {
-        enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
-      });
-      toggleRealTimeBtn.textContent = 'リアルタイム現在地更新 ON';
-    });
-  </script>
-</body>
-</html>
+  if (watchId) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    if (realTimeMarker) map.removeLayer(realTimeMarker);
+    toggleRealTimeBtn.textContent = 'リアルタイム現在地更新 OFF';
+    return;
+  }
+  if (!navigator.geolocation) return alert('現在地取得未対応');
+  watchId = navigator.geolocation.watchPosition(pos => {
+    const { latitude, longitude } = pos.coords;
+    if (!realTimeMarker) {
+      realTimeMarker = L.marker([latitude, longitude]).addTo(map).bindPopup('リアルタイム現在地');
+      addPoint(latitude, longitude, 'リアルタイム現在地');
+    } else {
+      realTimeMarker.setLatLng([latitude, longitude]);
+    }
+    map.setView([latitude, longitude], 14);
+    if (lastLatLng) {
+      const d = getDistance(lastLatLng.lat, lastLatLng.lng, latitude, longitude);
+      if (d >= AUTO_REDRAW_DISTANCE) drawRoute();
+    }
+    lastLatLng = { lat: latitude, lng: longitude };
+  }, err => alert('リアルタイム位置取得失敗: ' + err.message), {
+    enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
+  });
+  toggleRealTimeBtn.textContent = 'リアルタイム現在地更新 ON';
+});
