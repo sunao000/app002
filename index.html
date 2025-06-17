@@ -97,18 +97,24 @@
     }
 
     new Sortable(pointList, {
-      animation: 150,
-      onEnd: () => {
-        const newOrder = [];
-        pointList.querySelectorAll('li').forEach((li, i) => {
-          const idx = [...pointList.children].indexOf(li);
-          newOrder.push(points[idx]);
-        });
-        points = newOrder;
-        updateMarkers();
-        refreshPointList();
-      }
+  animation: 150,
+  onEnd: () => {
+    const newOrder = [];
+    const liElements = Array.from(pointList.children);
+    liElements.forEach(li => {
+      const text = li.querySelector('span.role-name').textContent;
+      const matched = points.find(p => {
+        const label = (p.name || `(${p.lat.toFixed(5)}, ${p.lng.toFixed(5)})`);
+        return text.includes(label);
+      });
+      if (matched) newOrder.push(matched);
     });
+    points = newOrder;
+    updateMarkers();
+    refreshPointList();
+  }
+});
+
 
     function getDistance(lat1, lng1, lat2, lng2) {
       const R = 6371000;
