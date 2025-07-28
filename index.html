@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>自転車ルート比較＋自動休憩（時間／kJ 基準）v5 完全版</title>
+<title>自転車ルート比較＋自動休憩（時間／kJ 基準）v5 安定版</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -118,14 +118,14 @@
 
 <script>
 /* === 定数 === */
-const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';// ←★あなたの API キー
+const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';// ←★API キー
 const ORS_ROOT = 'https://api.openrouteservice.org';
-const PROXY    = '';// 必要なら CORS プロキシ
+const PROXY    = '';// CORS プロキシが必要なら指定
 
 // POI カテゴリ（OpenRouteService）
 const POI_CATS = [451,443,624,518];
 const CAT_NAME = {451:'コンビニ',443:'ドラッグストア',624:'道の駅',518:'スーパー'};
-const RADII    = [1000,2000,3500]; // 50 km² 制限回避のため最大 3.5 km
+const RADII    = [1000,2000,3500]; // 面積上限対策で最大 3.5 km
 
 /* === ヘルパ === */
 const $ = id=>document.getElementById(id);
@@ -139,7 +139,8 @@ const rd = (x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
 const arr = x=>Array.isArray(x)?x:(x!=null?[x]:[]);
 
 /* === 状態 === */
-let pts=[], map, markerLayer, routeLayers={}, poiCache=new Map(), lastDir=0;
+let pts=[]; let map; let markerLayer; let routeLayers={}; let poiCache=new Map();
+let lastDirTs=0; // ← 重複を避けるため名前変更
 let lastAccum = {energyKJ:0, timeSec:0};
 
 /* === 初期化 === */
@@ -224,7 +225,7 @@ async function post(url, body){
     body: JSON.stringify(body)
   });
   const text = await r.text();
-  let data=null; try{ data = JSON.parse(text); }catch(_){}
+  let data=null; try{ data = JSON.parse(text); }catch(_){/* 非JSONの場合 */}
   if(!r.ok){
     throw new Error(`HTTP ${r.status} ${r.statusText}: ${text.slice(0,300)}`);
   }
@@ -235,11 +236,10 @@ async function post(url, body){
 }
 
 /* === Directions === */
-let lastDir=0;
 async function dir(body,profile){
-  const wait=1100-(Date.now()-lastDir); if(wait>0) await sleep(wait);
+  const wait=1100-(Date.now()-lastDirTs); if(wait>0) await sleep(wait);
   const j=await post(`${ORS_ROOT}/v2/directions/${profile}/geojson`,body);
-  lastDir=Date.now(); return j;
+  lastDirTs=Date.now(); return j;
 }
 const fetchRoute = dir;
 
@@ -306,12 +306,7 @@ async function makeRestByTime(feat,intS){
         const endIdx=st.way_points[1];
         const [lon,lat]=crd[endIdx];
         const poi=await nearPoi(lat,lon);
-        res.push({
-          name: pName(poi),
-          lat : poi.geometry.coordinates[1],
-          lon : poi.geometry.coordinates[0],
-          isRest:true
-        });
+        res.push({ name:pName(poi), lat:poi.geometry.coordinates[1], lon:poi.geometry.coordinates[0], isRest:true });
         acc=0;
       }
     }
