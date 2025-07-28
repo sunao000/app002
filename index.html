@@ -25,6 +25,9 @@
   .section{padding:8px;background:#fff;border-top:1px solid #eee}
   .group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .muted{color:#666;font-size:0.85em}
+  .presetKJ{border:1px solid #ccc;border-radius:14px;padding:2px 8px;font-size:.85em;background:#fff;cursor:pointer}
+  .presetKJ:hover{background:#f0f0f0}
+  .tips{font-size:.9em;line-height:1.5}
   details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
 </style>
 </head>
@@ -52,6 +55,10 @@
   </span>
   <span id="energyBox" class="group" style="display:none">
     <label>しきい値 <input id="restKJ" type="number" value="500" min="100" step="50" style="width:90px"> kJ</label>
+    <button type="button" class="presetKJ" data-kj="400">400</button>
+    <button type="button" class="presetKJ" data-kj="500">500</button>
+    <button type="button" class="presetKJ" data-kj="650">650</button>
+    <span class="muted">（標準は 450–600、暑熱や登坂多めは 300–450、ロングは 600–800 を目安）</span>
   </span>
 
   <select id="profileSelect">
@@ -76,6 +83,27 @@
     <div class="muted">平坦路での基礎消費係数。空力・転がり等を 1km あたりの kJ にまとめて近似します。</div>
     <label>平坦係数 <input id="flatKJperKm" type="number" value="18" min="10" max="30" step="0.5" style="width:90px"> kJ/km</label>
     <span class="muted">（目安：15〜24。向かい風・速い巡航は大きめ、追い風・ゆっくりは小さめ）</span>
+  </details>
+  <details id="kjTips">
+    <summary>kJ しきい値の目安</summary>
+    <div class="tips">
+      <p>機械的仕事量（kJ）で休憩タイミングを決めます。まずは <b>500 kJ</b> を試し、きつければ下げ、余裕なら上げてください。</p>
+      <table style="border-collapse:collapse;font-size:.9em">
+        <thead>
+          <tr><th style="border:1px solid #ccc;padding:4px">走り方</th><th style="border:1px solid #ccc;padding:4px">目安しきい値</th><th style="border:1px solid #ccc;padding:4px">例</th></tr>
+        </thead>
+        <tbody>
+          <tr><td style="border:1px solid #ccc;padding:4px">こまめに休みたい／暑熱</td><td style="border:1px solid #ccc;padding:4px"><b>300–400 kJ</b></td><td style="border:1px solid #ccc;padding:4px">120–150W を 30–45 分で 216–405 kJ</td></tr>
+          <tr><td style="border:1px solid #ccc;padding:4px">標準</td><td style="border:1px solid #ccc;padding:4px"><b>450–600 kJ</b></td><td style="border:1px solid #ccc;padding:4px">150–180W を 45–60 分で 405–648 kJ</td></tr>
+          <tr><td style="border:1px solid #ccc;padding:4px">ロング／登坂多め</td><td style="border:1px solid #ccc;padding:4px"><b>600–800 kJ</b></td><td style="border:1px solid #ccc;padding:4px">180–220W を 50–60 分で 540–792 kJ</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li>暑い／向かい風／登りが続く → <b>−100〜−200 kJ</b> へ。</li>
+        <li>涼しい／追い風／平坦主体 → <b>+100〜+200 kJ</b> へ。</li>
+        <li>参考換算：kcal ≈ kJ / 4.184 / 0.20–0.25（効率で変動）。</li>
+      </ul>
+    </div>
   </details>
 </div>
 
@@ -140,7 +168,9 @@ window.addEventListener('DOMContentLoaded',()=>{
     $('timeBox').style.display = (mode==='time')?'inline-flex':'none';
     $('energyBox').style.display= (mode==='energy')?'inline-flex':'none';
   };
-  initSortable();
+  $1
+  // プリセット kJ ボタン
+  document.addEventListener('click', e=>{ const b=e.target.closest('.presetKJ'); if(b){ $('restKJ').value=b.dataset.kj; }});
 });
 
 /* === Nominatim === */
