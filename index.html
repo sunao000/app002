@@ -114,6 +114,7 @@
 <div id="summary">
   <div id="routeInfo"></div>
   <div id="metricInfo" class="muted"></div>
+  <div id="uniformity"></div>
   <div class="legend">
     <div class="legend-item"><span class="legend-color" style="background:#ff0000"></span> 最短</div>
     <div class="legend-item"><span class="legend-color" style="background:#0066ff"></span> 最速</div>
@@ -140,6 +141,9 @@ const sleep = ms=>new Promise(r=>setTimeout(r,ms));
 const steepSum = f=>(f?.properties?.extras?.steepness?.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
 const icon = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
 const ICONS = {start:icon('green'),via:icon('blue'),goal:icon('red')};
+
+// 丸めヘルパ
+const rd = (x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
 const arr = x=>Array.isArray(x)?x:(x!=null?[x]:[]);
 
 /* === 状態 === */
@@ -303,6 +307,99 @@ async function makeRestByEnergy(feat, mass, flatKJperKm, thrKJ){
   return res;
 }
 
+/* === 区間負荷の均一性解析 === */
+function segmentEnergyStats(feature, mass, flatKJperKm){
+  const crd=feature.geometry.coordinates; const hasEle = crd[0].length>=3;
+  const segs = feature.properties.segments||[]; const rows=[];
+  for(const seg of segs){
+    let dist=0, dur=0, ekj=0;
+    for(const st of seg.steps){
+      const i0=st.way_points[0], i1=st.way_points[1];
+      const d=st.distance||0, t=st.duration||0; dist+=d; dur+=t;
+      const z0=hasEle?(crd[i0][2]||0):0; const z1=hasEle?(crd[i1][2]||0):0; const dz=z1-z0;
+      ekj += energyStepKJ(d, dz, mass, flatKJperKm);
+    }
+    const rate = dur>0 ? ekj/(dur/60) : 0; // kJ/min
+    rows.push({dist, dur, ekj, rate});
+  }
+  const values = rows.map(r=>r.rate);
+  const n=values.length; const mean = n? values.reduce((a,b)=>a+b,0)/n : 0;
+  const mse = n? values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n : 0;
+  const rmse = Math.sqrt(mse);
+  const cv = mean>0 ? (Math.sqrt(n?values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n:0)/mean)*100 : 0; // %
+  return {rows, mean, mse, rmse, cv, n};
+}
+function segmentTimeStats(feature){
+  const segs=feature.properties.segments||[]; const rows=[];
+  for(const seg of segs){
+    let dist=0, dur=0; for(const st of seg.steps){ dist+=(st.distance||0); dur+=(st.duration||0); }
+    const rate = dist>0 ? dur/(dist/1000) : 0; // min/km に相当（sを分換算してもよい）
+    rows.push({dist, dur, rate});
+  }
+  const values = rows.map(r=>r.dur/60); // 分
+  const n=values.length; const mean = n? values.reduce((a,b)=>a+b,0)/n : 0;
+  const mse = n? values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n : 0;
+  const rmse = Math.sqrt(mse);
+  const cv = mean>0 ? (Math.sqrt(n?values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n:0)/mean)*100 : 0;
+  return {rows, mean, mse, rmse, cv, n};
+}
+function renderUniformity(elem, basis, stats){
+  if(!stats || !stats.n){ elem.innerHTML=''; return; }
+  if(basis==='energy'){
+    const {n, mean, mse, rmse, cv, rows} = stats;
+    let html = `<details open><summary>区間負荷の均一性（kJ/min 基準）</summary>`+
+      `<div class="tips">区間ごとの <b>kJ/分</b> を用い、平均からの <b>MSE</b>・<b>RMSE</b>・<b>変動係数(CV)</b> を算出しています。数値が小さいほど均一です。</div>`+
+      `<ul class="muted" style="margin:6px 0">`+
+      `<li>N=${n}</li>`+
+      `<li>平均 ${rd(mean,1)} kJ/min</li>`+
+      `<li>MSE ${rd(mse,2)} / RMSE ${rd(rmse,2)} kJ/min</li>`+
+      `<li>CV ${rd(cv,1)} %</li>`+
+      `</ul>`;
+    html += `<table style="border-collapse:collapse;font-size:.9em"><thead><tr>`+
+      `<th style="border:1px solid #ccc;padding:4px">#</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">距離</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">時間</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">kJ</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">kJ/min</th>`+
+      `</tr></thead><tbody>`;
+    rows.forEach((r,i)=>{
+      html+=`<tr>`+
+        `<td style="border:1px solid #ccc;padding:4px">${i+1}</td>`+
+        `<td style="border:1px solid #ccc;padding:4px">${formatDist(r.dist)}</td>`+
+        `<td style="border:1px solid #ccc;padding:4px">${formatDur(r.dur)}</td>`+
+        `<td style="border:1px solid #ccc;padding:4px">${rd(r.ekj,1)}</td>`+
+        `<td style="border:1px solid #ccc;padding:4px">${rd(r.rate,2)}</td>`+
+        `</tr>`;
+    });
+    html += `</tbody></table></details>`;
+    elem.innerHTML = html;
+  }else{
+    const {n, mean, mse, rmse, cv, rows} = stats;
+    let html = `<details open><summary>区間負荷の均一性（時間基準）</summary>`+
+      `<div class="tips">区間ごとの <b>所要時間（分）</b> から <b>MSE</b>・<b>RMSE</b>・<b>CV</b> を算出。各区間の時間が揃うほど数値は小さくなります。</div>`+
+      `<ul class="muted" style="margin:6px 0">`+
+      `<li>N=${n}</li>`+
+      `<li>平均 ${rd(mean,1)} 分</li>`+
+      `<li>MSE ${rd(mse,2)} / RMSE ${rd(rmse,2)} 分</li>`+
+      `<li>CV ${rd(cv,1)} %</li>`+
+      `</ul>`;
+    html += `<table style="border-collapse:collapse;font-size:.9em"><thead><tr>`+
+      `<th style="border:1px solid #ccc;padding:4px">#</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">距離</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">時間</th>`+
+      `</tr></thead><tbody>`;
+    rows.forEach((r,i)=>{
+      html+=`<tr>`+
+        `<td style="border:1px solid #ccc;padding:4px">${i+1}</td>`+
+        `<td style="border:1px solid #ccc;padding:4px">${formatDist(r.dist)}</td>`+
+        `<td style="border:1px solid #ccc;padding:4px">${formatDur(r.dur)}</td>`+
+        `</tr>`;
+    });
+    html += `</tbody></table></details>`;
+    elem.innerHTML = html;
+  }
+}
+
 /******************* ルート描画 ************************/
 async function drawRoutes(){
   if(pts.length<2){alert('2地点以上登録してください');return;}
@@ -381,10 +478,17 @@ async function drawRoutes(){
       `<b>最速</b> ${formatDist(s2.distance)} / ${formatDur(s2.duration)}<br>`+
       `<b>勾配</b> ${formatDist(s3.distance)} / ${formatDur(s3.duration)}`;
 
-    // 指標サマリ（余り）
     const basis=$('restBasis').value;
     if(basis==='time'){
       $('metricInfo').textContent = `未満の累積: ${formatDur(lastAccum.timeSec)}`;
+      const stats = segmentTimeStats(fastest.features[0]);
+      renderUniformity($('uniformity'),'time',stats);
+    }else{
+      $('metricInfo').textContent = `未満の累積: ${lastAccum.energyKJ.toFixed(1)} kJ`;
+      const mass = Number($('riderWeight').value||65)+Number($('bikeWeight').value||9);
+      const flatKJperKm = Number($('flatKJperKm').value||18);
+      const stats = segmentEnergyStats(fastest.features[0], mass, flatKJperKm);
+      renderUniformity($('uniformity'),'energy',stats);
     }else{
       $('metricInfo').textContent = `未満の累積: ${lastAccum.energyKJ.toFixed(1)} kJ`;
     }
