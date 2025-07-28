@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋自動休憩（時間／kJ 基準）v5</title>
+<title>自転車ルート比較＋自動休憩（時間／kJ 基準）v5修正</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -114,6 +114,7 @@
 <div id="summary">
   <div id="routeInfo"></div>
   <div id="metricInfo" class="muted"></div>
+  <div id="distanceScore" class="muted"></div>
   <div id="uniformity"></div>
   <div class="legend">
     <div class="legend-item"><span class="legend-color" style="background:#ff0000"></span> 最短</div>
@@ -131,7 +132,7 @@ const PROXY    = '';// 必要なら CORS プロキシを指定
 // 休憩候補カテゴリ（ORS POI）
 const POI_CATS = [451,443,624,518];
 const CAT_NAME = {451:'コンビニ',443:'ドラッグストア',624:'道の駅',518:'スーパー'};
-const RADII    = [1000,2000,5000];
+const RADII    = [1000,2000,3500]; // 面積上限対策で最大3.5km
 
 /* === ヘルパ === */
 const $ = id=>document.getElementById(id);
@@ -236,17 +237,50 @@ async function pois(lat,lon,buf){
   const key=`${lat.toFixed(3)},${lon.toFixed(3)},${buf}`;
   if(poiCache.has(key))return poiCache.get(key);
   await sleep(1100);
-  const d=await post(`${ORS_ROOT}/pois`,{request:'pois',geometry:{geojson:{type:'Point',coordinates:[lon,lat]},buffer:buf},filters:{category_ids:POI_CATS},limit:20});
-  poiCache.set(key,d);return d;
+  const body={
+    request:'pois',
+    geometry:{geojson:{type:'Point',coordinates:[lon,lat]},buffer:buf},
+    limit:20,
+    sortby:'distance',
+    filters:{category_ids: POI_CATS.map(Number)}
+  };
+  try{
+    const d=await post(`${ORS_ROOT}/pois`,body);
+    poiCache.set(key,d);return d;
+  }catch(err){
+    console.error('POI 取得失敗 (categories)',{lat,lon,buf,body,err});
+    throw err;
+  }
 }
-function pName(p){
-  const t=p.properties?.osm_tags||{};
-  return t['name:ja']||t.name||t.brand||t.operator||p.properties?.name||'';
+async function poisWithFilter(lat,lon,buf,filter){
+  await sleep(1100);
+  const body={
+    request:'pois',
+    geometry:{geojson:{type:'Point',coordinates:[lon,lat]},buffer:buf},
+    limit:20,
+    sortby:'distance'
+  };
+  if(filter) body.filters=filter;
+  return post(`${ORS_ROOT}/pois`,body);
 }
 async function nearPoi(lat,lon){
+  const GROUPS_FALLBACK=[420,560,620,200]; // shops, sustenance, tourism, healthcare
   for(const r of RADII){
-    try{const d=await pois(lat,lon,r);if(d.features.length)return d.features[0];}catch{}
-  }return null;
+    try{
+      const d=await pois(lat,lon,r); if(d.features?.length) return d.features[0];
+    }catch(e){/* continue */}
+    for(const gid of GROUPS_FALLBACK){
+      try{
+        const d=await poisWithFilter(lat,lon,r,{category_group_ids:[gid]});
+        if(d.features?.length) return d.features[0];
+      }catch(e){/* continue */}
+    }
+    try{
+      const d=await poisWithFilter(lat,lon,r,null);
+      if(d.features?.length) return d.features[0];
+    }catch(e){/* continue */}
+  }
+  return null;
 }
 
 /* === 休憩（時間基準） === */
@@ -317,40 +351,52 @@ function segmentEnergyStats(feature, mass, flatKJperKm){
       const z0=hasEle?(crd[i0][2]||0):0; const z1=hasEle?(crd[i1][2]||0):0; const dz=z1-z0;
       ekj += energyStepKJ(d, dz, mass, flatKJperKm);
     }
-    const rate = dur>0 ? ekj/(dur/60) : 0; // kJ/min
-    rows.push({dist, dur, ekj, rate});
+    const rateMin = dur>0 ? ekj/(dur/60) : 0; // kJ/min
+    const rateKm  = dist>0 ? ekj/(dist/1000) : 0; // kJ/km
+    rows.push({dist, dur, ekj, rateMin, rateKm});
   }
-  const values = rows.map(r=>r.rate);
-  const n=values.length; const mean = n? values.reduce((a,b)=>a+b,0)/n : 0;
-  const mse = n? values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n : 0;
-  const rmse = Math.sqrt(mse);
-  const cv = mean>0 ? (Math.sqrt(n?values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n:0)/mean)*100 : 0; // %
-  return {rows, mean, mse, rmse, cv, n};
+  const vMin = rows.map(r=>r.rateMin);
+  const vKm  = rows.map(r=>r.rateKm);
+  const n=rows.length;
+  const meanMin = n? vMin.reduce((a,b)=>a+b,0)/n : 0;
+  const meanKm  = n? vKm .reduce((a,b)=>a+b,0)/n : 0;
+  const mseMin = n? vMin.reduce((s,x)=>s+Math.pow(x-meanMin,2),0)/n : 0;
+  const mseKm  = n? vKm .reduce((s,x)=>s+Math.pow(x-meanKm ,2),0)/n : 0;
+  return {
+    rows,
+    n,
+    meanMin, meanKm,
+    mseMin, mseKm,
+    rmseMin: Math.sqrt(mseMin),
+    rmseKm : Math.sqrt(mseKm),
+    cvMin: meanMin>0 ? Math.sqrt(mseMin)/meanMin*100 : 0,
+    cvKm : meanKm >0 ? Math.sqrt(mseKm )/meanKm *100 : 0,
+  };
 }
 function segmentTimeStats(feature){
   const segs=feature.properties.segments||[]; const rows=[];
   for(const seg of segs){
     let dist=0, dur=0; for(const st of seg.steps){ dist+=(st.distance||0); dur+=(st.duration||0); }
-    rows.push({dist, dur});
+    const minPerKm = dist>0 ? (dur/60)/(dist/1000) : 0; // 分/ km
+    rows.push({dist, dur, minPerKm});
   }
-  const values = rows.map(r=>r.dur/60); // 分
-  const n=values.length; const mean = n? values.reduce((a,b)=>a+b,0)/n : 0;
-  const mse = n? values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n : 0;
-  const rmse = Math.sqrt(mse);
-  const cv = mean>0 ? (Math.sqrt(n?values.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n:0)/mean)*100 : 0;
-  return {rows, mean, mse, rmse, cv, n};
+  const v = rows.map(r=>r.minPerKm);
+  const n=v.length; const mean = n? v.reduce((a,b)=>a+b,0)/n : 0;
+  const mse = n? v.reduce((s,x)=>s+Math.pow(x-mean,2),0)/n : 0;
+  return {rows, n, mean, mse, rmse: Math.sqrt(mse), cv: mean>0? Math.sqrt(mse)/mean*100:0};
 }
 function renderUniformity(elem, basis, stats){
   if(!stats || !stats.n){ elem.innerHTML=''; return; }
   if(basis==='energy'){
-    const {n, mean, mse, rmse, cv, rows} = stats;
-    let html = `<details open><summary>区間負荷の均一性（kJ/min 基準）</summary>`+
-      `<div class="tips">区間ごとの <b>kJ/分</b> を用い、平均からの <b>MSE</b>・<b>RMSE</b>・<b>変動係数(CV)</b> を算出しています。数値が小さいほど均一です。</div>`+
+    const {n, meanMin, meanKm, mseMin, mseKm, rmseMin, rmseKm, cvMin, cvKm, rows} = stats;
+    let html = `<details open><summary>区間負荷の均一性（kJ/min・kJ/km）</summary>`+
+      `<div class="tips">区間ごとに <b>kJ/分</b> と <b>kJ/km</b> を計算。平均からの <b>MSE</b>・<b>RMSE</b>・<b>CV</b> を表示します。小さいほど均一です。</div>`+
       `<ul class="muted" style="margin:6px 0">`+
       `<li>N=${n}</li>`+
-      `<li>平均 ${rd(mean,1)} kJ/min</li>`+
-      `<li>MSE ${rd(mse,2)} / RMSE ${rd(rmse,2)} kJ/min</li>`+
-      `<li>CV ${rd(cv,1)} %</li>`+
+      `<li>平均: ${rd(meanMin,2)} kJ/min / ${rd(meanKm,2)} kJ/km</li>`+
+      `<li>MSE: ${rd(mseMin,3)} (kJ/min)^2 / ${rd(mseKm,3)} (kJ/km)^2</li>`+
+      `<li>RMSE: ${rd(rmseMin,2)} kJ/min / ${rd(rmseKm,2)} kJ/km</li>`+
+      `<li>CV: ${rd(cvMin,1)} % / ${rd(cvKm,1)} %</li>`+
       `</ul>`;
     html += `<table style="border-collapse:collapse;font-size:.9em"><thead><tr>`+
       `<th style="border:1px solid #ccc;padding:4px">#</th>`+
@@ -358,38 +404,42 @@ function renderUniformity(elem, basis, stats){
       `<th style="border:1px solid #ccc;padding:4px">時間</th>`+
       `<th style="border:1px solid #ccc;padding:4px">kJ</th>`+
       `<th style="border:1px solid #ccc;padding:4px">kJ/min</th>`+
+      `<th style="border:1px solid #ccc;padding:4px">kJ/km</th>`+
       `</tr></thead><tbody>`;
     rows.forEach((r,i)=>{
       html+=`<tr>`+
-        `<td style="border:1px solid #ccc;padding:4px">${i+1}</td>`+
-        `<td style="border:1px solid #ccc;padding:4px">${formatDist(r.dist)}</td>`+
-        `<td style="border:1px solid #ccc;padding:4px">${formatDur(r.dur)}</td>`+
-        `<td style="border:1px solid #ccc;padding:4px">${rd(r.ekj,1)}</td>`+
-        `<td style="border:1px solid #ccc;padding:4px">${rd(r.rate,2)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${i+1}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${formatDist(r.dist)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${formatDur(r.dur)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${rd(r.ekj,1)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${rd(r.rateMin,2)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${rd(r.rateKm,2)}</td>`+
         `</tr>`;
     });
     html += `</tbody></table></details>`;
     elem.innerHTML = html;
   }else{
     const {n, mean, mse, rmse, cv, rows} = stats;
-    let html = `<details open><summary>区間負荷の均一性（時間基準）</summary>`+
-      `<div class="tips">区間ごとの <b>所要時間（分）</b> から <b>MSE</b>・<b>RMSE</b>・<b>CV</b> を算出。各区間の時間が揃うほど数値は小さくなります。</div>`+
+    let html = `<details open><summary>区間時間の均一性（分/km）</summary>`+
+      `<div class="tips">区間ごとの <b>分/km</b> を用いて平均からの <b>MSE</b>・<b>RMSE</b>・<b>CV</b> を算出。小さいほど均一。</div>`+
       `<ul class="muted" style="margin:6px 0">`+
       `<li>N=${n}</li>`+
-      `<li>平均 ${rd(mean,1)} 分</li>`+
-      `<li>MSE ${rd(mse,2)} / RMSE ${rd(rmse,2)} 分</li>`+
+      `<li>平均 ${rd(mean,2)} 分/km</li>`+
+      `<li>MSE ${rd(mse,3)} / RMSE ${rd(rmse,2)} 分/km</li>`+
       `<li>CV ${rd(cv,1)} %</li>`+
       `</ul>`;
-    html += `<table style="border-collapse:collapse;font-size:.9em"><thead><tr>`+
-      `<th style="border:1px solid #ccc;padding:4px">#</th>`+
-      `<th style="border:1px solid #ccc;padding:4px">距離</th>`+
-      `<th style="border:1px solid #ccc;padding:4px">時間</th>`+
+    html += `<table style=\"border-collapse:collapse;font-size:.9em\"><thead><tr>`+
+      `<th style=\"border:1px solid #ccc;padding:4px\">#</th>`+
+      `<th style=\"border:1px solid #ccc;padding:4px\">距離</th>`+
+      `<th style=\"border:1px solid #ccc;padding:4px\">時間</th>`+
+      `<th style=\"border:1px solid #ccc;padding:4px\">分/km</th>`+
       `</tr></thead><tbody>`;
     rows.forEach((r,i)=>{
       html+=`<tr>`+
-        `<td style="border:1px solid #ccc;padding:4px">${i+1}</td>`+
-        `<td style="border:1px solid #ccc;padding:4px">${formatDist(r.dist)}</td>`+
-        `<td style="border:1px solid #ccc;padding:4px">${formatDur(r.dur)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${i+1}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${formatDist(r.dist)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${formatDur(r.dur)}</td>`+
+        `<td style=\"border:1px solid #ccc;padding:4px\">${rd(r.minPerKm,2)}</td>`+
         `</tr>`;
     });
     html += `</tbody></table></details>`;
@@ -408,29 +458,28 @@ async function drawRoutes(){
   markerLayer=L.layerGroup().addTo(map);
   lastAccum={energyKJ:0,timeSec:0};
 
-  // 休憩挿入
+  // 休憩挿入（まず fastest でベースを取得して決定）
   if($('restToggle').checked){
     try{
       const base=await fetchRoute({coordinates:pts.map(p=>[p.lon,p.lat]),elevation:true,extra_info:['steepness'],preference:'fastest'},$('profileSelect').value);
       const feature=base.features[0];
-
       const basis=$('restBasis').value;
       if(basis==='time'){
-      $('metricInfo').textContent = `未満の累積: ${formatDur(lastAccum.timeSec)}`;
-      const stats = segmentTimeStats(fastest.features[0]);
-      renderUniformity($('uniformity'),'time',stats);
-      $('distanceScore').textContent = `距離スコア（RMSE）: ${rd(stats.rmse,2)} 分/km`;
-    }else{
-      $('metricInfo').textContent = `未満の累積: ${lastAccum.energyKJ.toFixed(1)} kJ`;
-      const mass = Number($('riderWeight').value||65)+Number($('bikeWeight').value||9);
-      const flatKJperKm = Number($('flatKJperKm').value||18);
-      const stats = segmentEnergyStats(fastest.features[0], mass, flatKJperKm);
-      renderUniformity($('uniformity'),'energy',stats);
-      $('distanceScore').textContent = `距離スコア（RMSE）: ${rd(stats.rmseKm,2)} kJ/km`;
-    }));
+        const interval=Number($('restMinutes').value||60)*60;
+        const rests=await makeRestByTime(feature,interval);
+        rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'}));
+      }else{
+        const mass = Number($('riderWeight').value||65) + Number($('bikeWeight').value||9);
+        const thrKJ = Number($('restKJ').value||500);
+        const flatKJperKm = Number($('flatKJperKm').value||18);
+        const rests=await makeRestByEnergy(feature,mass,flatKJperKm,thrKJ);
+        rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'}));
       }
       refreshList();
-    }catch(err){console.error(err);alert('休憩地点取得に失敗: '+err);}
+    }catch(err){
+      console.error(err);
+      alert('休憩地点取得に失敗: '+err);
+    }
   }
 
   // マーカー表示
@@ -439,7 +488,7 @@ async function drawRoutes(){
     markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ic}).bindTooltip(p.name));
   });
 
-  // ルート取得
+  // ルート取得（表示用）
   const profile=$('profileSelect').value;
   const coords =pts.map(p=>[p.lon,p.lat]);
   const base   ={coordinates:coords,elevation:true,extra_info:['steepness']};
@@ -483,12 +532,14 @@ async function drawRoutes(){
       $('metricInfo').textContent = `未満の累積: ${formatDur(lastAccum.timeSec)}`;
       const stats = segmentTimeStats(fastest.features[0]);
       renderUniformity($('uniformity'),'time',stats);
+      $('distanceScore').textContent = `距離スコア（RMSE）: ${rd(stats.rmse,2)} 分/km`;
     }else{
       $('metricInfo').textContent = `未満の累積: ${lastAccum.energyKJ.toFixed(1)} kJ`;
       const mass = Number($('riderWeight').value||65)+Number($('bikeWeight').value||9);
       const flatKJperKm = Number($('flatKJperKm').value||18);
       const stats = segmentEnergyStats(fastest.features[0], mass, flatKJperKm);
       renderUniformity($('uniformity'),'energy',stats);
+      $('distanceScore').textContent = `距離スコア（RMSE）: ${rd(stats.rmseKm,2)} kJ/km`;
     }
 
   }catch(err){
