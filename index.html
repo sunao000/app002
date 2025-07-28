@@ -130,17 +130,19 @@
   const POI_CATS = [451,443,624,518];
   const CAT_NAME = {451:'コンビニ',443:'ドラッグストア',624:'道の駅',518:'スーパー'};
   const RADII    = [1000,2000,3500]; // 面積上限対策で最大 3.5 km
+const CLOSE_TO_GOAL_M = 500;       // 目的地に近いときは休憩せず目的地優先（m）
 
-  /* === ヘルパ === */
-  const $ = id=>document.getElementById(id);
-  const formatDist = d=>(d/1000).toFixed(2)+' km';
-  const formatDur  = s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
-  const sleep = ms=>new Promise(r=>setTimeout(r,ms));
-  const steepSum = f=>(f?.properties?.extras?.steepness?.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
-  const icon = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
-  const ICONS = {start:icon('green'),via:icon('blue'),goal:icon('red')};
-  const rd = (x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
-  const arr = x=>Array.isArray(x)?x:(x!=null?[x]:[]);
+/* === ヘルパ === */
+const $ = id=>document.getElementById(id);
+const formatDist = d=>(d/1000).toFixed(2)+' km';
+const formatDur  = s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
+const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+const steepSum = f=>(f?.properties?.extras?.steepness?.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
+const icon = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
+const ICONS = {start:icon('green'),via:icon('blue'),goal:icon('red')};
+const rd = (x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
+const arr = x=>Array.isArray(x)?x:(x!=null?[x]:[]);
+const isCloseToGoal = (lat,lon,th=CLOSE_TO_GOAL_M)=>{ const g=pts.at(-1); if(!g) return false; return L.latLng(lat,lon).distanceTo([g.lat,g.lon])<=th; };
 
   /* === 状態 === */
   let pts=[]; let map; let markerLayer; let routeLayers={}; let poiCache=new Map();
@@ -298,22 +300,24 @@
 
   /* === 休憩（時間基準） === */
   async function makeRestByTime(feat,intS){
-    const crd=feat.geometry.coordinates; const segs=feat.properties.segments; let acc=0,res=[];
-    for(const seg of segs){
-      for(const st of seg.steps){
-        acc+=st.duration;
-        if(acc>=intS){
-          const endIdx=st.way_points[1];
-          const [lon,lat]=crd[endIdx];
-          const poi=await nearPoi(lat,lon);
-          res.push({ name:pName(poi), lat:poi.geometry.coordinates[1], lon:poi.geometry.coordinates[0], isRest:true });
-          acc=0;
-        }
+  const crd=feat.geometry.coordinates; const segs=feat.properties.segments; let acc=0,res=[]; let stop=false;
+  for(const seg of segs){ if(stop) break; 
+    for(const st of seg.steps){ if(stop) break;
+      acc+=st.duration;
+      if(acc>=intS){
+        const endIdx=st.way_points[1];
+        const [lon,lat]=crd[endIdx];
+        if(isCloseToGoal(lat,lon)) { acc=0; stop=true; break; }
+        const poi=await nearPoi(lat,lon);
+        if(isCloseToGoal(poi.geometry.coordinates[1], poi.geometry.coordinates[0])) { acc=0; stop=true; break; }
+        res.push({ name:pName(poi), lat:poi.geometry.coordinates[1], lon:poi.geometry.coordinates[0], isRest:true });
+        acc=0;
       }
     }
-    lastAccum.timeSec = acc; // 余り
-    return res;
   }
+  lastAccum.timeSec = acc; // 余り（打ち切り時は 0）
+  return res;
+}
 
   /* === 休憩（kJ基準：簡易モデル） === */
   function energyStepKJ(d, dz, mass, flatKJperKm){
@@ -323,29 +327,31 @@
     return Eflat + Eclimb;
   }
   async function makeRestByEnergy(feat, mass, flatKJperKm, thrKJ){
-    const crd=feat.geometry.coordinates; // [lon,lat,ele]
-    const segs=feat.properties.segments; let acc=0,res=[];
-    const hasEle = crd.length && crd[0].length>=3;
-    for(const seg of segs){
-      for(const st of seg.steps){
-        const i0=st.way_points[0], i1=st.way_points[1];
-        const d = st.distance || 0; // m
-        const z0 = hasEle ? (crd[i0][2]||0) : 0;
-        const z1 = hasEle ? (crd[i1][2]||0) : 0;
-        const dz = z1 - z0;
-        const Ekj = energyStepKJ(d, dz, mass, flatKJperKm);
-        acc += Ekj;
-        if(acc >= thrKJ){
-          const [lon,lat]=crd[i1];
-          const poi=await nearPoi(lat,lon);
-          res.push({ name:pName(poi), lat:poi.geometry.coordinates[1], lon:poi.geometry.coordinates[0], isRest:true });
-          acc = 0;
-        }
+  const crd=feat.geometry.coordinates; // [lon,lat,ele]
+  const segs=feat.properties.segments; let acc=0,res=[]; let stop=false;
+  const hasEle = crd.length && crd[0].length>=3;
+  for(const seg of segs){ if(stop) break;
+    for(const st of seg.steps){ if(stop) break;
+      const i0=st.way_points[0], i1=st.way_points[1];
+      const d = st.distance || 0; // m
+      const z0 = hasEle ? (crd[i0][2]||0) : 0;
+      const z1 = hasEle ? (crd[i1][2]||0) : 0;
+      const dz = z1 - z0;
+      const Ekj = energyStepKJ(d, dz, mass, flatKJperKm);
+      acc += Ekj;
+      if(acc >= thrKJ){
+        const [lon,lat]=crd[i1];
+        if(isCloseToGoal(lat,lon)) { acc=0; stop=true; break; }
+        const poi=await nearPoi(lat,lon);
+        if(isCloseToGoal(poi.geometry.coordinates[1], poi.geometry.coordinates[0])) { acc=0; stop=true; break; }
+        res.push({ name:pName(poi), lat:poi.geometry.coordinates[1], lon:poi.geometry.coordinates[0], isRest:true });
+        acc = 0;
       }
     }
-    lastAccum.energyKJ = acc; // 余り
-    return res;
   }
+  lastAccum.energyKJ = acc; // 余り（打ち切り時は 0）
+  return res;
+}
 
   /* === 区間負荷の均一性解析 === */
   function segmentEnergyStats(feature, mass, flatKJperKm){
