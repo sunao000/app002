@@ -416,15 +416,18 @@ async function drawRoutes(){
 
       const basis=$('restBasis').value;
       if(basis==='time'){
-        const interval=Number($('restMinutes').value||60)*60;
-        const rests=await makeRestByTime(feature,interval);
-        rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'}));
-      }else{ // energy (kJ)
-        const mass = Number($('riderWeight').value||65) + Number($('bikeWeight').value||9);
-        const thrKJ = Number($('restKJ').value||500);
-        const flatKJperKm = Number($('flatKJperKm').value||18);
-        const rests=await makeRestByEnergy(feature,mass,flatKJperKm,thrKJ);
-        rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'}));
+      $('metricInfo').textContent = `未満の累積: ${formatDur(lastAccum.timeSec)}`;
+      const stats = segmentTimeStats(fastest.features[0]);
+      renderUniformity($('uniformity'),'time',stats);
+      $('distanceScore').textContent = `距離スコア（RMSE）: ${rd(stats.rmse,2)} 分/km`;
+    }else{
+      $('metricInfo').textContent = `未満の累積: ${lastAccum.energyKJ.toFixed(1)} kJ`;
+      const mass = Number($('riderWeight').value||65)+Number($('bikeWeight').value||9);
+      const flatKJperKm = Number($('flatKJperKm').value||18);
+      const stats = segmentEnergyStats(fastest.features[0], mass, flatKJperKm);
+      renderUniformity($('uniformity'),'energy',stats);
+      $('distanceScore').textContent = `距離スコア（RMSE）: ${rd(stats.rmseKm,2)} kJ/km`;
+    }));
       }
       refreshList();
     }catch(err){console.error(err);alert('休憩地点取得に失敗: '+err);}
