@@ -141,14 +141,11 @@ const sleep = ms=>new Promise(r=>setTimeout(r,ms));
 const steepSum = f=>(f?.properties?.extras?.steepness?.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
 const icon = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
 const ICONS = {start:icon('green'),via:icon('blue'),goal:icon('red')};
-
-// 丸めヘルパ
-const rd = (x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
-const arr = x=>Array.isArray(x)?x:(x!=null?[x]:[]);
+const rd = (x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x; // 丸め
 
 /* === 状態 === */
 let pts=[], map, markerLayer, routeLayers={}, poiCache=new Map(), lastDir=0;
-let lastAccum = {energyKJ:0, timeSec:0}; // サマリー用
+let lastAccum = {energyKJ:0, timeSec:0};
 
 /* === 初期化 === */
 window.addEventListener('DOMContentLoaded',()=>{
@@ -172,7 +169,8 @@ window.addEventListener('DOMContentLoaded',()=>{
     $('timeBox').style.display = (mode==='time')?'inline-flex':'none';
     $('energyBox').style.display= (mode==='energy')?'inline-flex':'none';
   };
-  $1
+  initSortable();
+
   // プリセット kJ ボタン
   document.addEventListener('click', e=>{ const b=e.target.closest('.presetKJ'); if(b){ $('restKJ').value=b.dataset.kj; }});
 });
@@ -333,8 +331,7 @@ function segmentTimeStats(feature){
   const segs=feature.properties.segments||[]; const rows=[];
   for(const seg of segs){
     let dist=0, dur=0; for(const st of seg.steps){ dist+=(st.distance||0); dur+=(st.duration||0); }
-    const rate = dist>0 ? dur/(dist/1000) : 0; // min/km に相当（sを分換算してもよい）
-    rows.push({dist, dur, rate});
+    rows.push({dist, dur});
   }
   const values = rows.map(r=>r.dur/60); // 分
   const n=values.length; const mean = n? values.reduce((a,b)=>a+b,0)/n : 0;
@@ -489,8 +486,6 @@ async function drawRoutes(){
       const flatKJperKm = Number($('flatKJperKm').value||18);
       const stats = segmentEnergyStats(fastest.features[0], mass, flatKJperKm);
       renderUniformity($('uniformity'),'energy',stats);
-    }else{
-      $('metricInfo').textContent = `未満の累積: ${lastAccum.energyKJ.toFixed(1)} kJ`;
     }
 
   }catch(err){
