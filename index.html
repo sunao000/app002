@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋自動休憩 PNG 出力 v5.4</title>
+<title>自転車ルート比較＋自動休憩 PNG 出力 v5.4.1</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -46,7 +46,7 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
   <input id="restToggle" type="checkbox" checked hidden>
   <button id="restModeBtn">休憩込み: ON</button>
 
-  <!-- ★ PNG ダウンロードボタン -->
+  <!-- PNG ダウンロードボタン -->
   <button id="btnDownload" disabled>グラフ PNG ダウンロード</button>
 
   <label>基準
@@ -77,7 +77,7 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
   <label><input type="checkbox" id="chkSlope" checked> 勾配</label>
 </div>
 
-<!-- 基本パラメータ -->
+<!-- パラメータ -->
 <div class="section">
   <div class="group">
     <label>体重 <input id="riderWeight" type="number" value="65" min="30" max="150" step="0.5" style="width:80px"> kg</label>
@@ -105,7 +105,7 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
   </div>
 </div>
 
-<!-- オフスクリーン描画用 -->
+<!-- オフスクリーン描画 -->
 <div id="charts">
   <canvas id="energyChart"></canvas>
   <canvas id="rateChart"></canvas>
@@ -113,9 +113,9 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
 
 <script>
 /* ===== 定数・ヘルパ ===== */
-const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';   // ←★自分の OpenRouteService API キー
+const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';   // ← ★ここに自分の OpenRouteService API キー
 const ORS_ROOT = 'https://api.openrouteservice.org';
-const POI_CATS = [451,443,624,518];
+const POI_CATS = '451,443,624,518';  // クエリ直接埋め込み用
 const RADII    = [1000,2000,3500];
 const CLOSE_TO_GOAL_M = 500;
 
@@ -179,15 +179,40 @@ function drawList(){
 const fixType=()=>{if(pts[0])pts[0].type='start';if(pts.length>1)pts.at(-1).type='goal';};
 function initSortable(){new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{pts=Array.from($('pointList').children).map(li=>pts[li._idx]);fixType();drawList();}});}
 
-/* ===== 位置・API ===== */
-function addCurrent(){navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'));}
-async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});const t=await r.text();let d=null;try{d=JSON.parse(t);}catch{}if(!r.ok) throw new Error(`HTTP ${r.status}`);return d;}
-async function dir(body,prof){const w=1100-(Date.now()-lastDirTs);if(w>0) await sleep(w);const j=await post(`${ORS_ROOT}/v2/directions/${prof}/geojson`,body);lastDirTs=Date.now();return j;}
+/* ===== 位置 ===== */
+function addCurrent(){navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'))}
+
+/* ===== Directions API ===== */
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});if(!r.ok) throw new Error(`HTTP ${r.status}`);return r.json();}
+async function dir(body,prof){const wait=1100-(Date.now()-lastDirTs);if(wait>0) await sleep(wait);const d=await post(`${ORS_ROOT}/v2/directions/${prof}/geojson`,body);lastDirTs=Date.now();return d;}
+
+/* ===== POI GET (CORS OK) ===== */
+async function poiFetchGET(lat,lon,buf){
+  const qs = new URLSearchParams({
+    api_key: ORS_KEY,
+    request:'pois',
+    limit:20,
+    sortby:'distance',
+    geometry: JSON.stringify({buffer:buf,geojson:{type:'Point',coordinates:[lon,lat]}}),
+    filters : JSON.stringify({category_ids: POI_CATS.split(',').map(Number)})
+  });
+  const r = await fetch(`${ORS_ROOT}/pois?${qs.toString()}`);
+  if(!r.ok) throw new Error(r.status);
+  return r.json();
+}
+async function nearPoi(lat,lon){
+  for(const buf of RADII){
+    try{
+      const d=await poiFetchGET(lat,lon,buf);
+      if(d.features?.length) return d.features[0];
+    }catch{}
+  }
+  return {geometry:{coordinates:[lon,lat]},properties:{name:'休憩(取得失敗)'}};
+}
+const isClose=(lat,lon)=>{const g=pts.at(-1);return g?L.latLng(lat,lon).distanceTo([g.lat,g.lon])<=CLOSE_TO_GOAL_M:false;};
 
 /* ===== エネルギー・休憩 ===== */
 const energyStepKJ=(d,dz,m,flat)=>flat*(d/1000)+Math.max(dz,0)*m*9.80665/1000;
-async function nearPoi(lat,lon){for(const r of RADII){try{const d=await post(`${ORS_ROOT}/pois`,{request:'pois',geometry:{geojson:{type:'Point',coordinates:[lon,lat]},buffer:r},limit:20,sortby:'distance',filters:{category_ids:POI_CATS}});if(d.features?.length) return d.features[0];}catch{}}return{geometry:{coordinates:[lon,lat]},properties:{}};}
-const isClose=(lat,lon)=>{const g=pts.at(-1);return g?L.latLng(lat,lon).distanceTo([g.lat,g.lon])<=CLOSE_TO_GOAL_M:false;};
 async function makeRest(feat,basis,mass,flat,val){
   const crd=feat.geometry.coordinates,segs=feat.properties.segments,hasEle=crd[0].length>=3;
   let acc=0,res=[];for(const seg of segs){for(const st of seg.steps){
@@ -202,24 +227,31 @@ async function makeRest(feat,basis,mass,flat,val){
 }
 
 /* ===== PNG ===== */
-function buildChart(ctx,type,labels,data,label){return new Chart(ctx,{type,data:{labels,datasets:[{label,data,borderWidth:2,pointRadius:0}]},options:{animation:false,plugins:{legend:{display:false}},
-scales:{x:{title:{display:true,text:'距離 (km)'}},y:{title:{display:true,text:label}}}}});}
-function downloadCanvas(c,name){c.toBlob(b=>{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);},'image/png');}
+function buildChart(ctx,type,labels,data,label){return new Chart(ctx,{type,data:{labels,datasets:[{label,data,borderWidth:2,pointRadius:0}]},
+  options:{animation:false,plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'距離 (km)'}},
+  y:{title:{display:true,text:label}}}});}
+function downloadCanvas(c,name){
+  c.toBlob(blob=>{
+    if(!blob){alert('PNG 生成に失敗しました');return;}
+    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },'image/png');
+}
 function downloadEnergyGraphs(feat,mass,flat){
-  if(!feat){alert('まずルートを表示してください');return;}
-  const coords=feat.geometry.coordinates, hasEle=coords[0].length>=3;
+  if(!feat){alert('先にルートを描画してください');return;}
+  const coords=feat.geometry.coordinates,hasEle=coords[0].length>=3;
   let cumE=0,cumD=0,km=[],kjs=[],rates=[];
   for(let i=1;i<coords.length;i++){
     const [lon,lat,e]=coords[i],[plon,plat,pe]=coords[i-1];
     const d=L.latLng(lat,lon).distanceTo([plat,plon]),dz=hasEle?((e||0)-(pe||0)):0;
     cumD+=d; cumE+=energyStepKJ(d,dz,mass,flat);
     km.push((cumD/1000).toFixed(2)); kjs.push(cumE.toFixed(1));
-    const dk=cumE-kjs[kjs.length-2]||cumE, dd=km[km.length-1]-(km[km.length-2]||0);
+    const dk=cumE-(kjs[kjs.length-2]||0), dd=km[km.length-1]-(km[km.length-2]||0||1);
     rates.push((dk/dd).toFixed(2));
   }
   const ec=$('energyChart'),rc=$('rateChart');
-  const ch1=buildChart(ec,'line',km,kjs,'累積エネルギー (kJ)'),
-        ch2=buildChart(rc,'bar' ,km,rates,'kJ/km');
+  const ch1=buildChart(ec,'line',km,kjs,'累積エネルギー (kJ)');
+  const ch2=buildChart(rc,'bar' ,km,rates,'kJ/km');
   setTimeout(()=>{downloadCanvas(ec,'energy_profile.png');downloadCanvas(rc,'energy_rate.png');ch1.destroy();ch2.destroy();},150);
 }
 
@@ -231,49 +263,44 @@ async function drawRoutes(){
   if(markerLayer) map.removeLayer(markerLayer); markerLayer=L.layerGroup().addTo(map);
   pts.forEach(p=>{const ic=p.type==='start'?ICONS.start:p.type==='goal'?ICONS.goal:ICONS.via;markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ic}).bindTooltip(p.name));});
 
-  /* 休憩挿入前の仮ルートで POI 検索 */
   const profile=$('profileSelect').value, base={coordinates:pts.map(p=>[p.lon,p.lat]),elevation:true,extra_info:['steepness']};
   try{
-    const tmp=await dir({...base,preference:'fastest'},profile);
-    const m=Number($('riderWeight').value)+Number($('bikeWeight').value);const flat=Number($('flatKJperKm').value||18);
+    const preview=await dir({...base,preference:'fastest'},profile);
+    const mass=Number($('riderWeight').value)+Number($('bikeWeight').value);const flat=Number($('flatKJperKm').value||18);
     const basis=$('restBasis').value,val=basis==='time'?Number($('restMinutes').value)*60:Number($('restKJ').value);
     if($('restToggle').checked){
-      const rests=await makeRest(tmp.features[0],basis,m,flat,val);rests.forEach(r=>pts.splice(pts.length-1,0,r));
-      drawList();
+      const rests=await makeRest(preview.features[0],basis,mass,flat,val);rests.forEach(r=>pts.splice(pts.length-1,0,r));drawList();
     }
-
-    /* ルート本計算 */
     const coords=pts.map(p=>[p.lon,p.lat]);
-    const sh=await dir({...base,coordinates:coords,preference:'shortest'},profile);
-    const fa=await dir({...base,coordinates:coords,preference:'fastest'},profile);
-    const alt=coords.length===2?await dir({...base,coordinates:coords,preference:'shortest',
+    const shortest=await dir({...base,coordinates:coords,preference:'shortest'},profile);
+    const fastest =await dir({...base,coordinates:coords,preference:'fastest'},profile);
+    const alt =coords.length===2?await dir({...base,coordinates:coords,preference:'shortest',
       alternative_routes:{target_count:3,share_factor:0.6,weight_factor:1.4}},profile):null;
-    const sl=alt?alt.features.reduce((a,b)=>a.properties.extras.steepness.values.reduce((s,e)=>s+Math.abs(e[2]),0)<
-      b.properties.extras.steepness.values.reduce((s,e)=>s+Math.abs(e[2]),0)?a:b):sh.features[0];
+    const slope=alt?alt.features.reduce((a,b)=>
+      a.properties.extras.steepness.values.reduce((s,e)=>s+Math.abs(e[2]),0) <
+      b.properties.extras.steepness.values.reduce((s,e)=>s+Math.abs(e[2]),0)?a:b):shortest.features[0];
 
-    routeLayers.short=L.geoJSON(sh.features[0],{pane:'routeShortest',style:{color:'#ff0000',weight:6}}).addTo(map);
-    routeLayers.fast =L.geoJSON(fa.features[0],{pane:'routeFastest' ,style:{color:'#0066ff',weight:6,dashArray:'4 4'}}).addTo(map);
-    routeLayers.slope=L.geoJSON(sl,{pane:'routeSlope',style:{color:'#ff9900',weight:6,opacity:0.9}}).addTo(map);
+    routeLayers.short=L.geoJSON(shortest.features[0],{pane:'routeShortest',style:{color:'#ff0000',weight:6}}).addTo(map);
+    routeLayers.fast =L.geoJSON(fastest.features[0],{pane:'routeFastest',style:{color:'#0066ff',weight:6,dashArray:'4 4'}}).addTo(map);
+    routeLayers.slope=L.geoJSON(slope,{pane:'routeSlope',style:{color:'#ff9900',weight:6,opacity:0.9}}).addTo(map);
     updateLayerVisibility();
 
-    const b=new L.LatLngBounds(); markerLayer.eachLayer(l=>b.extend(l.getLatLng())); Object.values(routeLayers).forEach(l=>b.extend(l.getBounds()));
-    if(b.isValid()) map.fitBounds(b.pad(0.1));
+    const b=new L.LatLngBounds(); markerLayer.eachLayer(l=>b.extend(l.getLatLng()));
+    Object.values(routeLayers).forEach(l=>b.extend(l.getBounds())); if(b.isValid()) map.fitBounds(b.pad(0.1));
 
-    const s1=sh.features[0].properties.summary,s2=fa.features[0].properties.summary,s3=sl.properties.summary;
+    const s1=shortest.features[0].properties.summary,s2=fastest.features[0].properties.summary,s3=slope.properties.summary;
     $('routeInfo').innerHTML=`<b>最短</b> ${formatDist(s1.distance)} / ${formatDur(s1.duration)}<br>
       <b>最速</b> ${formatDist(s2.distance)} / ${formatDur(s2.duration)}<br>
       <b>勾配</b> ${formatDist(s3.distance)} / ${formatDur(s3.duration)}`;
 
-    /* ダウンロード用に保存 */
-    lastFastest = fa.features[0]; lastMass=m; lastFlat=flat; $('btnDownload').disabled=false;
+    lastFastest=fastest.features[0]; lastMass=mass; lastFlat=flat; $('btnDownload').disabled=false;
   }catch(e){console.error(e);alert('ルート取得失敗: '+e.message);}
 }
 
-/* ===== レイヤ可視切替 ===== */
+/* ===== レイヤ可視 ===== */
 function updateLayerVisibility(){
-  const mapChk={short:'chkShortest',fast:'chkFastest',slope:'chkSlope'};
-  for(const k in routeLayers){const cb=$(mapChk[k]);routeLayers[k]&&
-    (cb.checked?routeLayers[k].addTo(map):map.removeLayer(routeLayers[k]));}
+  const chk={short:'chkShortest',fast:'chkFastest',slope:'chkSlope'};
+  for(const k in routeLayers){routeLayers[k] && ($(chk[k]).checked?routeLayers[k].addTo(map):map.removeLayer(routeLayers[k]));}
 }
 </script>
 </body>
