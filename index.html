@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>自転車ルート比較＋自動休憩（時間／kJ／レート）v5.4</title>
+<title>自転車ルート比較＋自動休憩（時間／kJ／レート）v5.5 完全版</title>
 
+<!-- Leaflet & Sortable -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
@@ -16,8 +17,6 @@
   #pointList li{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #ccc;background:#fafafa;margin-bottom:4px;cursor:move}
   button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0 6px;font-size:12px}
   #searchResults{position:absolute;z-index:1000;width:260px;max-height:200px;overflow-y:auto;margin:4px 0 0;padding:0;list-style:none;border:1px solid #ccc;background:#fff}
-  #searchResults li{padding:4px 8px;cursor:pointer}
-  #searchResults li:hover{background:#e0e0e0}
   #summary{padding:8px;background:#fafafa;border-top:1px solid #ddd;font-size:0.9rem}
   .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:0.8rem}
   .legend-item{display:flex;align-items:center;gap:4px}
@@ -26,16 +25,16 @@
   .group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .muted{color:#666;font-size:0.85em}
   .presetKJ{border:1px solid #ccc;border-radius:14px;padding:2px 8px;font-size:.85em;background:#fff;cursor:pointer}
-  .presetKJ:hover{background:#f0f0f0}
   details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
 </style>
 </head>
 <body>
 
+<!-- ---------- Control Panel ---------- -->
 <div id="controls">
   <input id="placeInput" placeholder="地名・住所" style="width:260px" />
   <button id="searchBtn">検索</button>
-  <label><input type="checkbox" id="nearbyOnly" /> 近くの場所のみ</label>
+  <label><input type="checkbox" id="nearbyOnly" /> 近くのみ</label>
   <button id="locBtn">現在地追加</button>
 
   <input id="restToggle" type="checkbox" checked hidden />
@@ -74,6 +73,7 @@
   <label><input type="checkbox" id="chkSlope" checked /> 勾配</label>
 </div>
 
+<!-- ---------- Rider Settings ---------- -->
 <div class="section">
   <div class="group">
     <label>体重 <input id="riderWeight" type="number" value="65" min="30" max="150" step="0.5" style="width:80px" /> kg</label>
@@ -85,10 +85,12 @@
   </details>
 </div>
 
+<!-- lists & map -->
 <ul id="searchResults" hidden></ul>
 <ul id="pointList"></ul>
 <div id="map"></div>
 
+<!-- summary -->
 <div id="summary">
   <div id="routeInfo"></div>
   <div id="metricInfo" class="muted"></div>
@@ -101,116 +103,113 @@
   </div>
 </div>
 
+<!-- ---------- Main Script ---------- -->
 <script>
 (function(){
-  /* =============== 基本設定 ================= */
-  const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';                               // ★要入力★
+  /* ===================== CONFIG ===================== */
+  const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';             // ★ここに自分のキーを入力
   const ORS_ROOT = 'https://api.openrouteservice.org';
-  const PROXY    = 'https://corsproxy.io/?';         // /pois だけに使用
+  const MIN_INTERVAL = 1250;       // ms between ORS hits
+  const RADII = [800,1600,3000];   // Overpass 検索半径
+  const GOAL_M = 500;              // 目的地近傍判定 (m)
 
-  const MIN_INTERVAL = 1250;                        // ms : Directions / POI 共通ウェイト
-  const POI_MAX_FAIL = 5;                            // 連続失敗で検索停止
+  /* ===================== UTIL ======================= */
+  const $ = id=>document.getElementById(id);
+  const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+  const arr = x=>Array.isArray(x)?x:(x!=null?[x]:[]);
+  const rd  =(x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
+  const formatDist = d=>(d/1000).toFixed(2)+' km';
+  const formatDur  = s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
+  const steepSum=f=>arr(f?.properties?.extras?.steepness?.values).reduce((s,e)=>s+Math.abs(e[2]||0),0);
 
-  /* =============== ユーティリティ =============== */
-  const $=id=>document.getElementById(id);
-  const arr=x=>Array.isArray(x)?x:(x!=null?[x]:[]);
-  const rd=(x,n=1)=>Number.isFinite(x)?Number(x.toFixed(n)):x;
-  const formatDist=d=>(d/1000).toFixed(2)+' km';
-  const formatDur=s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
-  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  const steepSum=f=>(f?.properties?.extras?.steepness?.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
+  /* ===================== GLOBAL ===================== */
+  let pts=[];              // waypoints array
+  let map, markerLayer;    // Leaflet layers
+  let routeLayers={};
+  let lastTs=0;            // for throttling
 
-  /* =============== 定数 =============== */
-  const POI_CATS=[451,443,624,518];
-  const CAT_NAME={451:'コンビニ',443:'ドラッグストア',624:'道の駅',518:'スーパー'};
-  const RADII=[1000,2000,3500];
-  const GOAL_M=500;
-
-  /* =============== 状態 =============== */
-  let pts=[]; let map; let markerLayer; let routeLayers={};
-  let lastTs=0; let poiCache=new Map(); let poiFail=0;
-  let lastAccum={energyKJ:0,timeSec:0};
-
-  /* =============== 初期化 =============== */
+  /* ===================== INIT ======================= */
   window.addEventListener('DOMContentLoaded',()=>{
-    map=L.map('map').setView([34.07,134.55],11);
+    /* map */
+    map = L.map('map').setView([34.07,134.55],11);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap'}).addTo(map);
-    map.createPane('routeSlope').style.zIndex=690;
-    map.createPane('routeShortest').style.zIndex=700;
-    map.createPane('routeFastest').style.zIndex=710;
-    $('searchBtn').onclick=()=>{const q=$('placeInput').value.trim();q&&nomSearch(q)};
+    ['routeSlope','routeShortest','routeFastest'].forEach((p,i)=>{map.createPane(p).style.zIndex=690+i*10;});
+
+    /* UI events */
+    $('searchBtn').onclick=()=>{const q=$('placeInput').value.trim();q&&nomSearch(q);};
     $('locBtn').onclick=addCurrent;
     $('drawBtn').onclick=drawRoutes;
     ['chkShortest','chkFastest','chkSlope'].forEach(id=>$(id).onchange=updateLayerVisibility);
     $('restModeBtn').onclick=()=>{ $('restToggle').checked=!$('restToggle').checked; $('restModeBtn').textContent=`休憩込み: ${$('restToggle').checked?'ON':'OFF'}`; drawRoutes(); };
-    $('restBasis').onchange=()=>{ const m=$('restBasis').value; $('timeBox').style.display=(m==='time')?'inline-flex':'none'; $('energyBox').style.display=(m==='energy')?'inline-flex':'none'; $('energyRateBox').style.display=(m==='energy-rate')?'inline-flex':'none'; };
+    $('restBasis').onchange=()=>{ const b=$('restBasis').value; $('timeBox').style.display=(b==='time')?'inline-flex':'none'; $('energyBox').style.display=(b==='energy')?'inline-flex':'none'; $('energyRateBox').style.display=(b==='energy-rate')?'inline-flex':'none'; };
     document.addEventListener('click',e=>{const b=e.target.closest('.presetKJ'); if(b) $('restKJ').value=b.dataset.kj;});
     initSortable();
   });
 
-  /* =============== HTTP (スロットル＋プロキシ) =============== */
-  async function apiPost(path,body,useProxy){ const wait=MIN_INTERVAL-(Date.now()-lastTs); if(wait>0) await sleep(wait); const url=(useProxy?PROXY:'')+ORS_ROOT+path+(useProxy?`?api_key=${ORS_KEY}`:''); const opt={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}; if(!useProxy) opt.headers['Authorization']=ORS_KEY; const r=await fetch(url,opt); lastTs=Date.now(); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
-  const fetchDir=(b,prof)=>apiPost(`/v2/directions/${prof}/geojson`,b,false);
-  const postPOI=async body=>{ if(poiFail>=POI_MAX_FAIL) throw new Error('POI disabled'); try{ return await apiPost('/pois',body,true);} catch(e){ poiFail++; if(poiFail>=POI_MAX_FAIL) console.warn('POI 検索を停止しました'); throw e;} };
-
-  /* =============== Nominatim =============== */
+  /* ================= Nominatim ===================== */
   async function nomSearch(q){ let url=`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`; if($('nearbyOnly').checked){const b=map.getBounds(),box=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].join(','); url+=`&viewbox=${box}&bounded=1`;}
-    const arr=await (await fetch(url)).json(); const ul=$('searchResults'); ul.innerHTML=''; ul.hidden=!arr.length; arr.forEach(o=>{const li=document.createElement('li'); li.textContent=o.display_name; li.onclick=()=>{addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon}); ul.hidden=true; $('placeInput').value='';}; ul.appendChild(li);} ); }
+    const arr=await(await fetch(url)).json(); const ul=$('searchResults'); ul.innerHTML=''; ul.hidden=!arr.length;
+    arr.forEach(o=>{const li=document.createElement('li'); li.textContent=o.display_name; li.onclick=()=>{addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon}); ul.hidden=true; $('placeInput').value='';}; ul.appendChild(li);} ); }
 
-  /* =============== List 操作 =============== */
-  function addPoint(p){ p.type=pts.length?'':'start'; pts.forEach(d=>d.type==='goal'&&(d.type='via')); pts.push(p); if(pts.length>1) pts.at(-1).type='goal'; drawList(); }
-  function drawList(){ const ul=$('pointList'); ul.innerHTML=''; pts.forEach((p,i)=>{ const li=document.createElement('li'); li._idx=i; li.innerHTML=`<span>${p.name}</span>`; const del=document.createElement('button'); del.textContent='×'; del.className='del'; del.onclick=e=>{e.stopPropagation(); pts.splice(i,1); fixType(); drawList();}; li.appendChild(del); ul.appendChild(li);} ); }
+  /* =============== List & Current ================ */
+  function addPoint(p){ p.type=pts.length?'':'start'; pts.forEach(w=>w.type==='goal'&&(w.type='via')); pts.push(p); if(pts.length>1) pts.at(-1).type='goal'; drawList(); }
+  function drawList(){ const ul=$('pointList'); ul.innerHTML=''; pts.forEach((p,i)=>{ const li=document.createElement('li'); li._idx=i; li.innerHTML=`<span>${p.name}</span>`; const d=document.createElement('button'); d.textContent='×'; d.className='del'; d.onclick=e=>{e.stopPropagation(); pts.splice(i,1); fixType(); drawList();}; li.appendChild(d); ul.appendChild(li);} ); }
   const fixType=()=>{ if(pts[0]) pts[0].type='start'; if(pts.length>1) pts.at(-1).type='goal'; };
-  const initSortable=()=> new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{ pts=Array.from($('pointList').children).map(li=>pts[li._idx]); fixType(); drawList(); }});
-
-  /* =============== 現在地 =============== */
+  const initSortable=()=> new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{pts=Array.from($('pointList').children).map(li=>pts[li._idx]); fixType(); drawList();}});
   const addCurrent=()=>navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'));
 
-  /* =============== POI =============== */
-  const pName=p=>{const t=p.properties?.osm_tags||{}; const name=t['name:ja']||t.name||t.brand||t.operator||p.properties?.name; if(name) return name; const ids=arr(p.properties?.category_ids); const cat=ids.find(id=>CAT_NAME[id]); return cat?CAT_NAME[cat]:'休憩地点';};
-  async function nearPoi(lat,lon){ if(poiFail>=POI_MAX_FAIL) return {geometry:{coordinates:[lon,lat]},properties:{},fallback:true}; const point=[lon,lat]; const fetchPoi=(radius,filter)=>postPOI({request:'pois',geometry:{geojson:{type:'Point',coordinates:point},buffer:radius},limit:20,sortby:'distance',filters:filter});
-    for(const r of RADII){ try{ const d=await fetchPoi(r,{category_ids:POI_CATS}); if(d.features?.length) return d.features[0]; }catch(_){}
-      for(const gid of [420,560,620,200]){ try{ const d=await fetchPoi(r,{category_group_ids:[gid]}); if(d.features?.length) return d.features[0]; }catch(_){} }
-      try{ const d=await fetchPoi(r,null); if(d.features?.length) return d.features[0]; }catch(_){} }
-    return {geometry:{coordinates:point},properties:{},fallback:true}; }
+  /* ================ Overpass (POI) ================ */
+  async function overpass(lat,lon,r){ const q=`[out:json][timeout:25];(nwr(around:${r},${lat},${lon})["shop"];)out center 1;`; const url=`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`; try{const d=await(await fetch(url)).json(); if(d.elements?.length){ const e=d.elements[0]; const c=[e.lon||e.center.lon,e.lat||e.center.lat]; return {geometry:{coordinates:c},properties:{name:e.tags.name||e.tags.brand||'休憩地点',osm_tags:e.tags}}; }}catch(_){} return null; }
+  async function nearPoi(lat,lon){ for(const r of RADII){ const p=await overpass(lat,lon,r); if(p) return p;} return {geometry:{coordinates:[lon,lat]},properties:{},fallback:true}; }
 
-  /* =============== Energy util =============== */
+  /* ================ Energy util ================ */
   const energyStep=(d,dz,mass,flat)=>flat*(d/1000)+Math.max(dz,0)*mass*9.80665/1000;
 
-  /* =============== Rest Generators =============== */
-  async function makeRestByTime(feat,intS){ const crd=feat.geometry.coordinates; let acc=0,res=[]; for(const seg of feat.properties.segments){ for(const st of seg.steps){ acc+=st.duration; if(acc>=intS){ const [lon,lat]=crd[st.way_points[1]]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ acc=0; continue;} const poi=await nearPoi(lat,lon); res.push({name:pName(poi),lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); acc=0;} } } lastAccum.timeSec=acc; return res; }
-  async function makeRestByEnergy(feat,mass,flat,thrK){ const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let acc=0,res=[]; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points, d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; acc+=energyStep(d,dz,mass,flat); if(acc>=thrK){ const [lon,lat]=crd[i1]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ acc=0; continue;} const poi=await nearPoi(lat,lon); res.push({name:pName(poi),lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); acc=0;} } } lastAccum.energyKJ=acc; return res; }
-  async function makeRestByRate(feat,mass,flat,thr,winM){ const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let res=[],queue=[],dWin=0,eWin=0; const flush=()=>{queue=[];dWin=0;eWin=0;}; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points, d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; const e=energyStep(d,dz,mass,flat); queue.push({d,e}); dWin+=d; eWin+=e; while(dWin>winM&&queue.length){const q=queue.shift();dWin-=q.d;eWin-=q.e;} const rate=(eWin/1000)/(dWin/1000); if(rate>thr){ const [lon,lat]=crd[i1]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ flush(); continue;} const poi=await nearPoi(lat,lon); res.push({name:pName(poi),lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); flush(); } } } return res; }
+  /* ================ ORS Directions ================ */
+  async function orsPost(path,body){ const wait=MIN_INTERVAL-(Date.now()-lastTs); if(wait>0) await sleep(wait); const r=await fetch(`${ORS_ROOT}${path}`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)}); lastTs=Date.now(); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
+  const fetchDir=(body,prof)=>orsPost(`/v2/directions/${prof}/geojson`,body);
 
-  /* =============== Main Draw =============== */
-  async function drawRoutes(){ if(pts.length<2){alert('2地点以上登録してください');return;} poiFail=0; lastAccum={energyKJ:0,timeSec:0};
-    Object.values(routeLayers).forEach(l=>l&&map.removeLayer(l)); routeLayers={}; if(markerLayer) map.removeLayer(markerLayer); markerLayer=L.layerGroup().addTo(map);
+  /* ======== Rest Generators (time/energy/rate) ======== */
+  async function makeRestByTime(feat,intS){ const crd=feat.geometry.coordinates; let acc=0,res=[]; for(const seg of feat.properties.segments){ for(const st of seg.steps){ acc+=st.duration; if(acc>=intS){ const [lon,lat]=crd[st.way_points[1]]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ acc=0; continue;} const poi=await nearPoi(lat,lon); res.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); acc=0;} } } return res; }
+  async function makeRestByEnergy(feat,mass,flat,thr){ const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let acc=0,res=[]; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points, d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; acc+=energyStep(d,dz,mass,flat); if(acc>=thr){ const [lon,lat]=crd[i1]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ acc=0; continue;} const poi=await nearPoi(lat,lon); res.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); acc=0;} } } return res; }
+  async function makeRestByRate(feat,mass,flat,thr,winM){ const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let res=[],queue=[],dWin=0,eWin=0; const flush=()=>{queue=[];dWin=0;eWin=0;}; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points, d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; const e=energyStep(d,dz,mass,flat); queue.push({d,e}); dWin+=d; eWin+=e; while(dWin>winM&&queue.length){const q=queue.shift();dWin-=q.d;eWin-=q.e;} const rate=(eWin/1000)/(dWin/1000); if(rate>thr){ const [lon,lat]=crd[i1]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ flush(); continue;} const poi=await nearPoi(lat,lon); res.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); flush(); } } } return res; }
 
-    /* base Directions for rest */
-    const profile=$('profileSelect').value; const coords=pts.map(p=>[p.lon,p.lat]); const baseReq={coordinates:coords,elevation:true,extra_info:['steepness']}; let tmpFeat;
-    if($('restToggle').checked){ try{ const f=await fetchDir(baseReq,'cycling-road'); tmpFeat=f.features[0]; const basis=$('restBasis').value; let rests=[]; if(basis==='time'){ rests=await makeRestByTime(tmpFeat,Number($('restMinutes').value)*60);} else if(basis==='energy'){ const mass=Number($('riderWeight').value)+Number($('bikeWeight').value); rests=await makeRestByEnergy(tmpFeat,mass,Number($('flatKJperKm').value),Number($('restKJ').value));} else { const mass=Number($('riderWeight').value)+Number($('bikeWeight').value); rests=await makeRestByRate(tmpFeat,mass,Number($('flatKJperKm').value),Number($('restRateKJ').value),Number($('rateWindow').value));} rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'})); drawList(); }catch(e){console.warn('休憩挿入失敗',e.message);} }
+  /* ================= drawRoutes ================= */
+  async function drawRoutes(){ if(pts.length<2){alert('2地点以上登録してください');return;}
+    // clear
+    Object.values(routeLayers).forEach(l=>l&&map.removeLayer(l)); routeLayers={}; if(markerLayer) map.removeLayer(markerLayer); markerLayer=L.featureGroup().addTo(map);
 
-    /* Markers */
+    // Rest insertion
+    if($('restToggle').checked){ try{ const base=await fetchDir({coordinates:pts.map(p=>[p.lon,p.lat]),elevation:true,extra_info:['steepness']},'cycling-road'); const feat=base.features[0]; const mass=Number($('riderWeight').value)+Number($('bikeWeight').value), flat=Number($('flatKJperKm').value);
+        let rests=[]; switch($('restBasis').value){case 'time': rests=await makeRestByTime(feat,Number($('restMinutes').value)*60); break; case 'energy': rests=await makeRestByEnergy(feat,mass,flat,Number($('restKJ').value)); break; case 'energy-rate': rests=await makeRestByRate(feat,mass,flat,Number($('restRateKJ').value),Number($('rateWindow').value));}
+        rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'})); drawList(); }catch(e){console.warn('休憩挿入失敗',e.message);} }
+
+    // markers
     const dot=c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]}); const ic={start:dot('green'),goal:dot('red'),via:dot('blue')}; pts.forEach(p=>markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ic[p.type]}).bindTooltip(p.name)));
 
-    /* Directions 3 ルート */
-    const [shortRes,fastRes]=await Promise.all([fetchDir({...baseReq,preference:'shortest'},profile),fetchDir({...baseReq,preference:'fastest'},profile)]);
+    // Directions 3 routes
+    const profile=$('profileSelect').value; const coords=pts.map(p=>[p.lon,p.lat]); const req={coordinates:coords,elevation:true,extra_info:['steepness']};
+    const [shortRes,fastRes] = await Promise.all([
+      fetchDir({...req,preference:'shortest'},profile),
+      fetchDir({...req,preference:'fastest'},profile)
+    ]);
     const shortest=shortRes.features[0], fastest=fastRes.features[0];
-    const alt=await fetchDir({...baseReq,preference:'shortest',alternative_routes:{target_count:3,share_factor:0.6,weight_factor:1.4}},profile);
+    const alt=await fetchDir({...req,preference:'shortest',alternative_routes:{target_count:3,share_factor:0.6,weight_factor:1.4}},profile);
     const slope=alt.features.reduce((a,b)=>steepSum(a)<steepSum(b)?a:b);
 
     routeLayers.short=L.geoJSON(shortest,{pane:'routeShortest',style:{color:'#ff0000',weight:6}}).addTo(map);
-    routeLayers.fast=L.geoJSON(fastest,{pane:'routeFastest',style:{color:'#0066ff',weight:6,dashArray:'4 4'}}).addTo(map);
-    routeLayers.slope=L.geoJSON(slope,{pane:'routeSlope',style:{color:'#ff9900',weight:6,opacity:0.9}}).addTo(map);
+    routeLayers.fast =L.geoJSON(fastest ,{pane:'routeFastest' ,style:{color:'#0066ff',weight:6,dashArray:'4 4'}}).addTo(map);
+    routeLayers.slope=L.geoJSON(slope   ,{pane:'routeSlope'   ,style:{color:'#ff9900',weight:6,opacity:0.9}}).addTo(map);
     updateLayerVisibility();
 
     const s1=shortest.properties.summary, s2=fastest.properties.summary, s3=slope.properties.summary;
     $('routeInfo').innerHTML=`<b>最短</b> ${formatDist(s1.distance)} / ${formatDur(s1.duration)}<br><b>最速</b> ${formatDist(s2.distance)} / ${formatDur(s2.duration)}<br><b>勾配</b> ${formatDist(s3.distance)} / ${formatDur(s3.duration)}`;
 
-    map.fitBounds(markerLayer.getBounds().pad(0.1));
+    if(markerLayer.getLayers().length) map.fitBounds(markerLayer.getBounds().pad(0.1));
   }
 
-  const updateLayerVisibility=()=>{ const m={short:'chkShortest',fast:'chkFastest',slope:'chkSlope'}; for(const k in routeLayers){ routeLayers[k] &&( $(m[k]).checked?routeLayers[k].addTo(map):map.removeLayer(routeLayers[k]) ); } };
+  /* ================= Helpers ================= */
+  const updateLayerVisibility=()=>{ const v={short:'chkShortest',fast:'chkFastest',slope:'chkSlope'}; for(const k in routeLayers){ routeLayers[k] && ($(v[k]).checked?routeLayers[k].addTo(map):map.removeLayer(routeLayers[k])); } };
 })();
 </script>
 </body>
