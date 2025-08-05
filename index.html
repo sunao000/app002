@@ -192,7 +192,7 @@ async function nearPoi(lat,lon){
       filters :JSON.stringify({category_ids:POI_CATS})
     });
     try{
-      const r=await fetch(CORS+`${ORS_ROOT}/pois?${qs.toString()}`);
+      const r = await fetch(CORS+`${ORS_ROOT}/pois?${qs.toString()}`);
       if(!r.ok) throw new Error();
       const d=await r.json();
       if(d.features?.length) return d.features[0];
@@ -222,7 +222,7 @@ async function makeRest(feat,basis,mass,flat,thr){
 /* ===== PNG ===== */
 function buildChart(ctx,type,labels,data,label){return new Chart(ctx,{type,data:{labels,datasets:[{label,data,borderWidth:2,pointRadius:0}]},
   options:{animation:false,plugins:{legend:{display:false}},
-  scales:{x:{title:{display:true,text:'距離 (km)'}},y:{title:{display:true,text:label}}}});}
+  scales:{x:{title:{display:true,text:'距離 (km)'}},y:{title:{display:true,text:label}}}}
 function downloadCanvas(c,name){c.toBlob(b=>{if(!b){alert('PNG 生成に失敗');return;}const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);},'image/png');}
 function downloadEnergyGraphs(feat,mass,flat){
   if(!feat){alert('先にルートを描画してください');return;}
@@ -233,8 +233,9 @@ function downloadEnergyGraphs(feat,mass,flat){
     const d=L.latLng(lat,lon).distanceTo([plat,plon]),dz=hasEle?((e||0)-(pe||0)):0;
     cumD+=d; cumE+=energyStepKJ(d,dz,mass,flat);
     km.push((cumD/1000).toFixed(2)); kjs.push(cumE.toFixed(1));
-    const dk=cumE-(kjs[kjs.length-2]||0), dd=d/1000;
-    rates.push((dk/Math.max(dd,0.01)).toFixed(2));
+    const dk = cumE - (kjs[kjs.length-2] || 0);
+    const dd = d/1000 || 0.001;  // 0 除算防止
+    rates.push((dk/dd).toFixed(2));
   }
   const ec=$('energyChart'),rc=$('rateChart');
   const ch1=buildChart(ec,'line',km,kjs,'累積エネルギー (kJ)');
@@ -297,3 +298,4 @@ function updateLayerVisibility(){const m={short:'chkShortest',fast:'chkFastest',
 </script>
 </body>
 </html>
+
