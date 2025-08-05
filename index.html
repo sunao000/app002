@@ -168,31 +168,64 @@ const pName=p=>p?.properties?.name||p?.properties?.osm_tags?.name||'休憩地点
 const eKJ=(d,dz,m,flat)=>flat*(d/1000)+m*9.80665*Math.max(dz,0)/1000;
 
 /* ---------- 休憩挿入 ---------- */
-async function insertRests(feat,mode){
-  const cs=feat.geometry.coordinates, segs=feat.properties.segments, goal=pts.at(-1), elev=cs[0].length>=3;
-  const m=+$('riderWeight').value + +$('bikeWeight').value, flat=+$('flatKJperKm').value;
-  let res=[], accKJ=0, accT=0, prevRate=null;
+/* これで上書きしてください */
+async function insertRests(feat, mode){
+  const cs   = feat.geometry.coordinates;
+  const segs = feat.properties.segments;
+  const goal = pts.at(-1);
+  const elev = cs[0].length >= 3;
 
-  for(const seg of segs)for(const st of seg.steps){
-    const [i0,i1]=st.way_points, d=st.distance||0; if(!d)continue;
-    const dz=elev?cs[i1][2]-cs[i0][2]:0, Ek=eKJ(d,dz,m,flat), rate=Ek/(d/1000);
-    accKJ+=Ek; accT+=(st.duration||0);
+  const m    = +$('riderWeight').value + +$('bikeWeight').value;
+  const flat = +$('flatKJperKm').value;
+  const Δthr = +$('deltaKJ').value;
+  const KJthr= +$('restKJ').value;
+  const Tthr = +$('restMinutes').value * 60;
 
-    const hitTime = mode==='time'        && accT  >= +$('restMinutes').value*60;
-    const hitAcc  = mode==='energy'      && accKJ >= +$('restKJ').value;
-    const hitDiff = mode==='energyDiff'  && prevRate!==null && rate-prevRate >= +$('deltaKJ').value;
-    const hitComb = mode==='energyCombo' && prevRate!==null && rate-prevRate >= +$('deltaKJ').value && accKJ>= +$('restKJ').value;
+  let res=[], bucketΔ=0, bucketDist=0, accKJ=0, accT=0, prevRate=null;
 
-    if(hitTime||hitAcc||hitDiff||hitComb){
-      const [lon,lat]=cs[i1]; if(close500(goal,lat,lon)){accKJ=accT=0;prevRate=rate;continue;}
-      let poi=await nearPoi(lat,lon); if(!poi)poi={geometry:{coordinates:[lon,lat]},properties:{}};
-      res.push({name:pName(poi),lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],type:'via',isRest:true});
-      accKJ=accT=0;
+  for(const seg of segs){
+    for(const st of seg.steps){
+      const [i0,i1] = st.way_points;
+      const d  = st.distance || 0;        if(!d) continue;
+      const dz = elev ? cs[i1][2]-cs[i0][2] : 0;
+      const Ek = flat*(d/1000) + m*9.80665*Math.max(dz,0)/1000;
+      const rate = Ek / (d/1000);
+
+      /* ---- 累積 ---- */
+      bucketΔ   += prevRate!==null ? Math.abs(rate - prevRate) * (d/1000) : 0; // kJ/km × km
+      bucketDist+= d/1000;
+      accKJ     += Ek;
+      accT      += st.duration || 0;
+
+      /* ---- 判定 ---- */
+      const kmHit   = bucketDist >= 1 && (bucketΔ / bucketDist) >= Δthr;  // 1km ごと平均Δ
+      const timeHit = mode==='time'        && accT  >= Tthr;
+      const accHit  = mode==='energy'      && accKJ >= KJthr;
+      const diffHit = mode==='energyDiff'  && kmHit;
+      const comboHit= mode==='energyCombo' && kmHit && accKJ >= KJthr;
+
+      if(timeHit||accHit||diffHit||comboHit){
+        const [lon,lat]=cs[i1];
+        if(close500(goal,lat,lon)){ bucketΔ=bucketDist=accKJ=accT=0; prevRate=rate; continue; }
+
+        let poi=await nearPoi(lat,lon);
+        if(!poi) poi={geometry:{coordinates:[lon,lat]},properties:{}};
+
+        res.push({name:pName(poi),
+                  lat :poi.geometry.coordinates[1],
+                  lon :poi.geometry.coordinates[0],
+                  type:'via', isRest:true});
+
+        /* リセット */
+        bucketΔ = bucketDist = accKJ = accT = 0;
+      }
+      prevRate = rate;
     }
-    prevRate=rate;
   }
+  /* 休憩点を挿入 */
   pts.splice(pts.length-1,0,...res);
 }
+
 
 /* ---------- ルート描画 ---------- */
 async function drawRoutes(){
@@ -234,3 +267,4 @@ function toggleLayers(){const t={short:'chkShortest',fast:'chkFastest',slope:'ch
 </script>
 </body>
 </html>
+
