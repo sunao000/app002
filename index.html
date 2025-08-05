@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>自転車ルート比較＋自動休憩 v5.4-early</title>
+<title>自転車ルート比較＋自動休憩 v5.4-fix1</title>
 
+<link rel="icon" href="data:,"><!-- 404 回避 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script  src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script  src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <style>
+/* ……（CSS は変更なし。省略可）…… */
 body{margin:0;font-family:system-ui,sans-serif}
 #map{height:500px}
 #controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#f7f7f7}
@@ -28,6 +30,7 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 
 <!-- ── UI ─────────────────────────────────────────── -->
 <div id="controls">
+  <!-- …（HTML は元のまま）… -->
   <input id="placeInput" placeholder="地名・住所" style="width:260px">
   <button id="searchBtn">検索</button>
   <label><input type="checkbox" id="nearbyOnly"> 近くのみ</label>
@@ -85,8 +88,8 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 
 <script>
 /* ===== 環境設定 ===== */
-const ORS_KEY='5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';            // ←自分のキー
-const PROXY  ='https://corsproxy.io/?';     // CORS 不要なら ''
+const ORS_KEY='5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';          // ←★自分の API キーを入力
+const PROXY  ='https://corsproxy.io/?url='; // ←★必ず url= を付ける
 
 /* ===== ヘルパ ===== */
 const $=id=>document.getElementById(id);
@@ -139,40 +142,58 @@ const fixType=()=>{if(pts[0])pts[0].type='start';if(pts.length>1)pts.at(-1).type
 function addCurrent(){navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'));}
 
 /* ===== 通信 ===== */
-async function post(url,body){const r=await fetch(PROXY+url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json();}
-async function dir(body,prof){const wait=1100-(Date.now()-lastTs);if(wait>0)await sleep(wait);const j=await post(`https://api.openrouteservice.org/v2/directions/${prof}/geojson`,body);lastTs=Date.now();return j;}
+async function post(url,body){
+  /* PROXY が設定されていればエンコード付きで付加 */
+  const fetchUrl = PROXY ? PROXY + encodeURIComponent(url) : url;
+  const r=await fetch(fetchUrl,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':ORS_KEY},
+    body:JSON.stringify(body)
+  });
+  if(!r.ok)throw new Error(await r.text());
+  return r.json();
+}
+async function dir(body,prof){
+  const wait=1100-(Date.now()-lastTs);
+  if(wait>0)await sleep(wait);
+  const j=await post(`https://api.openrouteservice.org/v2/directions/${prof}/geojson`,body);
+  lastTs=Date.now();
+  return j;
+}
 
-/* ===== POI (fallback 可) ===== */
-async function nearPoi(lat,lon){try{return (await post('https://api.openrouteservice.org/pois',{request:'pois',geometry:{geojson:{type:'Point',coordinates:[lon,lat]},buffer:1500},limit:1})).features[0]||null;}catch{return null;}}
+/* ===== POI ===== */
+async function nearPoi(lat,lon){
+  try{
+    return (await post('https://api.openrouteservice.org/pois',{
+      request:'pois',
+      geometry:{geojson:{type:'Point',coordinates:[lon,lat]},buffer:1500},
+      limit:1
+    })).features[0]||null;
+  }catch{return null;}
+}
 const pName=p=>p?.properties?.name||p?.properties?.osm_tags?.name||'休憩地点';
 
 /* ===== エネルギー ===== */
 const eKJ=(d,dz,m,f)=>f*(d/1000)+m*9.80665*Math.max(dz,0)/1000;
 
-/* ===== 休憩挿入 (200 m 早期検知 ＋ 1 km バケット) ===== */
+/* ===== 休憩挿入 ===== */
 async function insertRests(feat,mode){
   const cs=feat.geometry.coordinates, segs=feat.properties.segments, goal=pts.at(-1), elev=cs[0].length>=3;
   const m=+$('riderWeight').value + +$('bikeWeight').value, flat=+$('flatKJperKm').value;
 
-  /* しきい値 */
-  const deltaEarly = 15;                          // 200 m Δ [kJ/km]
-  const Δthr  = +$('deltaKJ').value;              // 1 km 平均 Δ
+  const deltaEarly = 15;                 // 200 m Δ [kJ/km]
+  const Δthr  = +$('deltaKJ').value;     // 1 km 平均 Δ
   const KJthr = +$('restKJ').value;
   const Tthr  = +$('restMinutes').value * 60;
 
-  /* 累積変数 */
-  let res=[], bucketΔ=0, bucketDist=0,
-      accKJ=0, accT=0,
-      prevRate=null, flagEarly=false;
+  let res=[], bucketΔ=0, bucketDist=0, accKJ=0, accT=0, prevRate=null, flagEarly=false;
 
   for(const seg of segs)for(const st of seg.steps){
     const [i0,i1]=st.way_points, d=st.distance||0; if(!d) continue;
     const dz=elev?cs[i1][2]-cs[i0][2]:0, Ek=eKJ(d,dz,m,flat), rate=Ek/(d/1000);
 
-    /* ― 200 m Δ 判定 ― */
     if(prevRate!==null && Math.abs(rate-prevRate)>=deltaEarly) flagEarly=true;
 
-    /* ― 累積 ― */
     bucketΔ   += prevRate!==null?Math.abs(rate-prevRate)*(d/1000):0;
     bucketDist+= d/1000;
     accKJ     += Ek;
@@ -184,7 +205,7 @@ async function insertRests(feat,mode){
     const hitTime = mode==='time'        && accT>=Tthr;
     const hitAcc  = mode==='energy'      && accKJ>=KJthr;
     const hitDiff = mode==='energyDiff'  && (flagEarly||kmHit);
-    const hitComb = mode==='energyCombo' && (flagEarly || kmHit) && accKJ >= KJthr;
+    const hitComb = mode==='energyCombo' && (flagEarly||kmHit) && accKJ>=KJthr;
 
     if(hitTime||hitAcc||hitDiff||hitComb){
       const [lon,lat]=cs[i1];
@@ -193,7 +214,6 @@ async function insertRests(feat,mode){
       let poi=await nearPoi(lat,lon); if(!poi)poi={geometry:{coordinates:[lon,lat]},properties:{}};
       res.push({name:pName(poi),lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],type:'via',isRest:true});
 
-      /* 完全リセット */
       bucketΔ=bucketDist=accKJ=accT=0; flagEarly=false;
     }
     prevRate=rate;
@@ -231,8 +251,12 @@ async function drawRoutes(){
 }
 
 /* ===== Layer 表示切替 ===== */
-function toggleLayers(){const m={short:'chkShortest',fast:'chkFastest'};for(const k in routeLayers){routeLayers[k]&&($(m[k]).checked?routeLayers[k].addTo(map):map.removeLayer(routeLayers[k]));}}
+function toggleLayers(){
+  const m={short:'chkShortest',fast:'chkFastest'};
+  for(const k in routeLayers){
+    routeLayers[k]&&($(m[k]).checked?routeLayers[k].addTo(map):map.removeLayer(routeLayers[k]));
+  }
+}
 </script>
 </body>
 </html>
-
