@@ -122,7 +122,12 @@
 
     $('searchBtn').onclick=()=>doSearch();
     $('placeInput').addEventListener('keyup',e=>{if(e.key==='Enter') doSearch();});
-    document.addEventListener('click',e=>{if(!e.target.closest('#searchResults')&&!e.target.closest('#placeInput')) $('searchResults').hidden=true;});
+    // hide search list when clicking outside (pointerdown で先に判定)
+    document.addEventListener('pointerdown',e=>{
+      if(!e.target.closest('#searchResults') && !e.target.closest('#placeInput')) {
+        $('searchResults').hidden = true;
+      }
+    });});
     $('locBtn').onclick=addCurrent;
     $('drawBtn').onclick=drawRoutes;
     $('restBasis').onchange=syncInput;
@@ -138,7 +143,11 @@
   };
 
   /* ==== NOMINATIM SEARCH ==== */
-  async function doSearch(){ const q=$('placeInput').value.trim(); if(!q) return; const url=`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`; const arr=await(await fetch(url)).json(); const ul=$('searchResults'); ul.innerHTML=''; ul.hidden=!arr.length; arr.forEach(o=>{const li=document.createElement('li'); li.textContent=o.display_name; li.onclick=()=>{ addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon}); ul.hidden=true; $('placeInput').value=''; }; ul.appendChild(li);}); }
+  async function doSearch(){ const q=$('placeInput').value.trim(); if(!q) return; const url=`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`; const arr=await(await fetch(url)).json(); const ul=$('searchResults'); ul.innerHTML=''; ul.hidden=!arr.length; arr.forEach(o=>{const li=document.createElement('li');
+      li.textContent=o.display_name;
+      // リストが即座に閉じてクリックが発火しない問題を防ぐ
+      li.onpointerdown=e=>e.stopPropagation();
+      li.onclick=()=>{ addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon}); ul.hidden=true; $('placeInput').value=''; }; ul.appendChild(li);}); }
 
   /* ==== LIST MANIP ==== */
   function addPoint(p){ p.type=pts.length?'':'start'; pts.forEach(v=>v.type==='goal'&&(v.type='via')); pts.push(p); if(pts.length>1) pts.at(-1).type='goal'; drawList(); }
