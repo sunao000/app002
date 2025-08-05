@@ -3,15 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋自動休憩 PNG 出力 v5.4.3</title>
+<title>自転車ルート比較＋自動休憩 PNG 出力 v5.4.4</title>
 
 <!-- 依存ライブラリ -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script  src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script  src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script  src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
+/* --- スタイルは以前と同じ --- */
 body{margin:0;font-family:system-ui,sans-serif}
 #map{height:500px;width:100%}
 #controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#f7f7f7}
@@ -37,7 +38,7 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
 </head>
 <body>
 
-<!-- ────────── UI ────────── -->
+<!-- ────────── UI：省略なし ────────── -->
 <div id="controls">
   <input id="placeInput" placeholder="地名・住所" style="width:260px">
   <button id="searchBtn">検索</button>
@@ -77,7 +78,6 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
   <label><input type="checkbox" id="chkSlope" checked> 勾配</label>
 </div>
 
-<!-- 基本パラメータ -->
 <div class="section">
   <div class="group">
     <label>体重 <input id="riderWeight" type="number" value="65" min="30" max="150" step="0.5" style="width:80px"> kg</label>
@@ -98,7 +98,7 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
   <div id="distanceScore" class="muted"></div>
 </div>
 
-<!-- オフスクリーン描画（PNG 生成用） -->
+<!-- オフスクリーン描画 -->
 <div id="charts">
   <canvas id="energyChart"></canvas>
   <canvas id="rateChart"></canvas>
@@ -106,9 +106,9 @@ details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
 
 <script>
 /* ===== 定数 ===== */
-const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';                         // ←★自分のキー
+const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';                                   // ←★自分のキー
 const ORS_ROOT = 'https://api.openrouteservice.org';
-const CORS     = 'https://cors.isomorphic-git.org/'; // CORS プロキシ
+const CORS     = 'https://cors.isomorphic-git.org/';   // CORS プロキシ
 const POI_CATS = [451,443,624,518];
 const RADII    = [1000,2000,3500];
 const CLOSE_TO_GOAL_M = 500;
@@ -126,7 +126,7 @@ const steepSum   = f=>(f.properties.extras.steepness.values||[]).reduce((s,e)=>s
 let pts=[], map, markerLayer, routeLayers={}, lastDirTs=0;
 let lastFastest=null,lastMass=0,lastFlat=18;
 
-/* ===== 初期化 ===== */
+/* ===== 初期化・イベント登録 ===== */
 window.addEventListener('DOMContentLoaded',()=>{
   map=L.map('map').setView([34.07,134.55],11);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap'}).addTo(map);
@@ -144,7 +144,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   initSortable();
 });
 
-/* ===== 検索 ===== */
+/* ===== Nominatim 検索 ===== */
 async function nomSearch(q){
   let url=`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`;
   if($('nearbyOnly').checked){
@@ -160,7 +160,7 @@ async function nomSearch(q){
   });
 }
 
-/* ===== リスト操作 ===== */
+/* ===== リスト UI ===== */
 function addPoint(p){p.type=pts.length?'':'start';pts.forEach(d=>d.type==='goal'&&(d.type='via'));pts.push(p);if(pts.length>1)pts.at(-1).type='goal';drawList();}
 function drawList(){
   const ul=$('pointList');ul.innerHTML='';
@@ -173,17 +173,16 @@ function drawList(){
   });
 }
 function fixType(){if(pts[0])pts[0].type='start';if(pts.length>1)pts.at(-1).type='goal';}
-function initSortable(){new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{
-  pts=Array.from($('pointList').children).map(li=>pts[li._idx]);fixType();drawList();}});}
+function initSortable(){new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{pts=Array.from($('pointList').children).map(li=>pts[li._idx]);fixType();drawList();}});}
 
-/* ===== 現在地 ===== */
+/* ===== 現在地追加 ===== */
 function addCurrent(){navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'));}
 
-/* ===== Directions API ===== */
+/* ===== ORS Directions ===== */
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});if(!r.ok) throw new Error(r.status);return r.json();}
 async function dir(body,profile){const wait=1100-(Date.now()-lastDirTs);if(wait>0) await sleep(wait);const d=await post(`${ORS_ROOT}/v2/directions/${profile}/geojson`,body);lastDirTs=Date.now();return d;}
 
-/* ===== POI 取得（CORS プロキシ経由） ===== */
+/* ===== POI 取得 (CORS) ===== */
 async function nearPoi(lat,lon){
   for(const buf of RADII){
     const qs=new URLSearchParams({
@@ -192,7 +191,7 @@ async function nearPoi(lat,lon){
       filters :JSON.stringify({category_ids:POI_CATS})
     });
     try{
-      const r = await fetch(CORS+`${ORS_ROOT}/pois?${qs.toString()}`);
+      const r=await fetch(CORS+`${ORS_ROOT}/pois?${qs.toString()}`);
       if(!r.ok) throw new Error();
       const d=await r.json();
       if(d.features?.length) return d.features[0];
@@ -202,7 +201,7 @@ async function nearPoi(lat,lon){
 }
 const isClose=(lat,lon)=>{const g=pts.at(-1);return g?L.latLng(lat,lon).distanceTo([g.lat,g.lon])<=CLOSE_TO_GOAL_M:false;};
 
-/* ===== 休憩 ===== */
+/* ===== 休憩ロジック ===== */
 const energyStepKJ=(d,dz,m,flat)=>flat*(d/1000)+Math.max(dz,0)*m*9.80665/1000;
 async function makeRest(feat,basis,mass,flat,thr){
   const crd=feat.geometry.coordinates,segs=feat.properties.segments,hasEle=crd[0].length>=3;
@@ -213,17 +212,34 @@ async function makeRest(feat,basis,mass,flat,thr){
     if(acc>=thr){
       const [lon,lat]=crd[i1];if(isClose(lat,lon)){acc=0;continue;}
       const poi=await nearPoi(lat,lon);if(isClose(poi.geometry.coordinates[1],poi.geometry.coordinates[0])){acc=0;continue;}
-      res.push({name:poi.properties.name||'休憩',lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],type:'via',isRest:true});
-      acc=0;
+      res.push({name:poi.properties.name||'休憩',lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],type:'via',isRest:true}); acc=0;
     }
   }}return res;
 }
 
-/* ===== PNG ===== */
-function buildChart(ctx,type,labels,data,label){return new Chart(ctx,{type,data:{labels,datasets:[{label,data,borderWidth:2,pointRadius:0}]},
-  options:{animation:false,plugins:{legend:{display:false}},
-  scales:{x:{title:{display:true,text:'距離 (km)'}},y:{title:{display:true,text:label}}}}
-function downloadCanvas(c,name){c.toBlob(b=>{if(!b){alert('PNG 生成に失敗');return;}const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);},'image/png');}
+/* ===== PNG 出力ユーティリティ ===== */
+function buildChart(ctx,type,labels,data,label){
+  return new Chart(ctx,{
+    type,
+    data:{labels,datasets:[{label,data,borderWidth:2,pointRadius:0}]},
+    options:{
+      animation:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{title:{display:true,text:'距離 (km)'}},
+        y:{title:{display:true,text:label}}
+      }
+    }
+  });
+}
+function downloadCanvas(c,name){
+  c.toBlob(blob=>{
+    if(!blob){alert('PNG 生成に失敗');return;}
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=name;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },'image/png');
+}
 function downloadEnergyGraphs(feat,mass,flat){
   if(!feat){alert('先にルートを描画してください');return;}
   const coords=feat.geometry.coordinates,hasEle=coords[0].length>=3;
@@ -233,8 +249,7 @@ function downloadEnergyGraphs(feat,mass,flat){
     const d=L.latLng(lat,lon).distanceTo([plat,plon]),dz=hasEle?((e||0)-(pe||0)):0;
     cumD+=d; cumE+=energyStepKJ(d,dz,mass,flat);
     km.push((cumD/1000).toFixed(2)); kjs.push(cumE.toFixed(1));
-    const dk = cumE - (kjs[kjs.length-2] || 0);
-    const dd = d/1000 || 0.001;  // 0 除算防止
+    const dk=cumE-(kjs[kjs.length-2]||0), dd=d/1000||0.001;
     rates.push((dk/dd).toFixed(2));
   }
   const ec=$('energyChart'),rc=$('rateChart');
@@ -243,10 +258,10 @@ function downloadEnergyGraphs(feat,mass,flat){
   setTimeout(()=>{downloadCanvas(ec,'energy_profile.png');downloadCanvas(rc,'energy_rate.png');ch1.destroy();ch2.destroy();},120);
 }
 
-/* ===== メイン ===== */
+/* ===== メイン描画 ===== */
 async function drawRoutes(){
   $('btnDownload').disabled=true; lastFastest=null;
-  if(pts.length<2){alert('2地点以上登録');return;}
+  if(pts.length<2){alert('2地点以上登録してください');return;}
 
   Object.values(routeLayers).forEach(l=>l&&map.removeLayer(l)); routeLayers={};
   if(markerLayer) map.removeLayer(markerLayer);
@@ -260,6 +275,7 @@ async function drawRoutes(){
   const basis=$('restBasis').value;
   const thr  =basis==='time'?Number($('restMinutes').value)*60:Number($('restKJ').value);
 
+  /* 休憩地点挿入プレビュー */
   try{
     const preview=await dir({coordinates:pts.map(p=>[p.lon,p.lat]),elevation:true,extra_info:['steepness'],preference:'fastest'},profile);
     if($('restToggle').checked){
@@ -267,12 +283,13 @@ async function drawRoutes(){
       rests.forEach(r=>pts.splice(pts.length-1,0,r));
       drawList();
     }
-  }catch(e){console.warn('休憩挿入失敗',e);}
+  }catch(e){console.warn('休憩取得失敗',e);}
 
+  /* 本ルート取得 */
   const coords=pts.map(p=>[p.lon,p.lat]),base={coordinates:coords,elevation:true,extra_info:['steepness']};
   try{
-    const shortest = await dir({...base,preference:'shortest'},profile);
-    const fastest  = await dir({...base,preference:'fastest'},profile);
+    const shortest=await dir({...base,preference:'shortest'},profile);
+    const fastest =await dir({...base,preference:'fastest' },profile);
     let slope=shortest.features[0];
     if(coords.length===2){
       const alt=await dir({...base,preference:'shortest',alternative_routes:{target_count:3,share_factor:0.6,weight_factor:1.4}},profile);
@@ -298,4 +315,3 @@ function updateLayerVisibility(){const m={short:'chkShortest',fast:'chkFastest',
 </script>
 </body>
 </html>
-
