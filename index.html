@@ -184,7 +184,7 @@ async function insertRests(feat,mode){
     const hitTime = mode==='time'        && accT>=Tthr;
     const hitAcc  = mode==='energy'      && accKJ>=KJthr;
     const hitDiff = mode==='energyDiff'  && (flagEarly||kmHit);
-    const hitComb = mode==='energyCombo' && (flagEarly||kmHit||accKJ>=KJthr);
+    const hitComb = mode==='energyCombo' && (flagEarly || kmHit) && accKJ >= KJthr;
 
     if(hitTime||hitAcc||hitDiff||hitComb){
       const [lon,lat]=cs[i1];
@@ -235,3 +235,4 @@ function toggleLayers(){const m={short:'chkShortest',fast:'chkFastest'};for(cons
 </script>
 </body>
 </html>
+
