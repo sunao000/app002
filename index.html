@@ -3,37 +3,34 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>自転車ルート比較＋自動休憩（時間／累積kJ／変化率／ハイブリッド）v5.6</title>
-
+<title>自転車ルート比較＋自動休憩 v5.7 (Time / kJ / ΔkJ/km / Hybrid)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <style>
- body{margin:0;font-family:system-ui,sans-serif}
- #map{height:500px;width:100%}
- #controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#f7f7f7}
- #pointList{list-style:none;margin:0;padding:0}
- #pointList li{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #ccc;background:#fafafa;margin-bottom:4px;cursor:move}
- button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0 6px;font-size:12px}
- #searchResults{position:absolute;z-index:1000;width:260px;max-height:200px;overflow-y:auto;margin:4px 0 0;padding:0;list-style:none;border:1px solid #ccc;background:#fff}
- #summary{padding:8px;background:#fafafa;border-top:1px solid #ddd;font-size:0.9rem}
- .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:0.8rem}
- .legend-item{display:flex;align-items:center;gap:4px}
- .legend-color{width:14px;height:14px;border-radius:3px}
- .section{padding:8px;background:#fff;border-top:1px solid #eee}
- .group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
- .muted{color:#666;font-size:0.85em}
- .presetKJ{border:1px solid #ccc;border-radius:14px;padding:2px 8px;font-size:.85em;background:#fff;cursor:pointer}
- details{border:1px solid #ddd;border-radius:6px;padding:6px;background:#fff}
+  body{margin:0;font-family:system-ui,sans-serif}
+  #map{height:500px;width:100%}
+  #controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#f7f7f7}
+  #pointList{list-style:none;margin:0;padding:0}
+  #pointList li{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #ccc;background:#fafafa;margin-bottom:4px;cursor:move}
+  button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0 6px;font-size:12px}
+  #searchResults{position:absolute;z-index:1000;width:260px;max-height:200px;overflow-y:auto;margin:4px 0 0;padding:0;list-style:none;border:1px solid #ccc;background:#fff}
+  #summary{padding:8px;background:#fafafa;border-top:1px solid #ddd;font-size:0.9rem}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:0.8rem}
+  .legend-item{display:flex;align-items:center;gap:4px}
+  .legend-color{width:14px;height:14px;border-radius:3px}
+  .section{padding:8px;background:#fff;border-top:1px solid #eee}
+  .group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .muted{color:#666;font-size:0.85em}
+  .presetKJ{border:1px solid #ccc;border-radius:14px;padding:2px 8px;font-size:.85em;background:#fff;cursor:pointer}
 </style>
 </head>
 <body>
 
-<!-- ================= Controls ================= -->
+<!-- ---------- Controls ---------- -->
 <div id="controls">
-  <input id="placeInput" placeholder="地名・住所" style="width:260px" />
+  <input id="placeInput" placeholder="地名・住所" style="width:260px">
   <button id="searchBtn">検索</button>
-  <label><input type="checkbox" id="nearbyOnly"> 近くのみ</label>
   <button id="locBtn">現在地追加</button>
 
   <input id="restToggle" type="checkbox" checked hidden>
@@ -41,30 +38,30 @@
 
   <label>基準
     <select id="restBasis">
-      <option value="time" selected>時間</option>
+      <option value="time">時間</option>
       <option value="energy">kJ累積</option>
-      <option value="energy-rate">kJ/km 変化率</option>
-      <option value="energy-hybrid">累積+kJ/km</option>
+      <option value="energy-rate">kJ/km変化率</option>
+      <option value="energy-hybrid" selected>累積 + 変化率</option>
     </select>
   </label>
 
-  <span id="timeBox" class="group">
+  <span id="timeBox" class="group" style="display:none">
     <label>間隔 <input id="restMinutes" type="number" value="60" min="15" step="5" style="width:70px"> 分</label>
   </span>
-  <span id="energyBox" class="group" style="display:none">
-    <label>しきい値 <input id="restKJ" type="number" value="500" min="100" step="50" style="width:90px"> kJ</label>
+  <span id="energyBox" class="group">
+    <label>累積 <input id="restKJ" type="number" value="500" min="100" step="50" style="width:90px"> kJ</label>
     <button class="presetKJ" data-kj="400">400</button>
     <button class="presetKJ" data-kj="500">500</button>
     <button class="presetKJ" data-kj="650">650</button>
   </span>
-  <span id="energyRateBox" class="group" style="display:none">
+  <span id="energyRateBox" class="group">
     <label>レート <input id="restRateKJ" type="number" value="28" min="10" step="1" style="width:70px"> kJ/km</label>
     <label>窓幅 <input id="rateWindow" type="number" value="500" min="100" step="100" style="width:70px"> m</label>
   </span>
 
   <select id="profileSelect">
-    <option value="cycling-road" selected>ロードバイク</option>
-    <option value="cycling-regular">自転車（一般）</option>
+    <option value="cycling-road" selected>ロード</option>
+    <option value="cycling-regular">一般車</option>
   </select>
   <button id="drawBtn">ルート表示</button>
 
@@ -73,11 +70,11 @@
   <label><input type="checkbox" id="chkSlope" checked> 勾配</label>
 </div>
 
-<!-- ============== Rider Section ============== -->
+<!-- ---------- Rider / Bike ---------- -->
 <div class="section">
   <div class="group">
     <label>体重 <input id="riderWeight" type="number" value="65" min="30" max="150" step="0.5" style="width:80px"> kg</label>
-    <label>バイク重量 <input id="bikeWeight" type="number" value="10" min="5" max="30" step="0.1" style="width:80px"> kg</label>
+    <label>バイク <input id="bikeWeight" type="number" value="10" min="5" max="30" step="0.1" style="width:80px"> kg</label>
   </div>
   <details>
     <summary>平坦係数 (kJ/km)</summary>
@@ -85,98 +82,110 @@
   </details>
 </div>
 
-<ul id="searchResults" hidden></ul>
 <ul id="pointList"></ul>
 <div id="map"></div>
-
-<div id="summary">
-  <div id="routeInfo"></div>
-</div>
+<div id="summary"><div id="routeInfo"></div></div>
 
 <script>
 (function(){
-  /* ---- Config ---- */
-  const ORS_KEY='5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';
-  const ORS_ROOT='https://api.openrouteservice.org';
-  const MIN_INTERVAL=1250;
-  const RADII=[800,1600,3000];
-  const GOAL_M=500;
+  /* ===== Config ===== */
+  const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';//★自分のキー
+  const ORS_ROOT = 'https://api.openrouteservice.org';
+  const MIN_INTERVAL = 1200;
+  const MAX_WAYPOINTS = 50; // ORS ハード制限
+  const RADII = [800,1600,3000];
+  const GOAL_M = 500;
 
-  /* ---- Utils ---- */
+  /* ===== Utils ===== */
   const $=id=>document.getElementById(id);
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const formatDist=d=>(d/1000).toFixed(2)+' km';
   const formatDur=s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
   const energyStep=(d,dz,mass,flat)=>flat*(d/1000)+Math.max(dz,0)*mass*9.80665/1000;
 
-  /* ---- Global ---- */
-  let pts=[];let map,markerLayer;let lastTs=0;let routeLayers={};
+  /* ===== State ===== */
+  let pts=[]; let map,markerLayer; let routeLayers={}; let lastTs=0;
 
-  /* ---- Init ---- */
+  /* ===== Init ===== */
   window.addEventListener('DOMContentLoaded',()=>{
-    map=L.map('map').setView([34.07,134.55],11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap'}).addTo(map);
-
-    $('searchBtn').onclick=()=>{const q=$('placeInput').value.trim();q&&nomSearch(q);} ;
+    map=L.map('map').setView([34.5,134.5],10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OSM'}).addTo(map);
+    $('searchBtn').onclick=()=>{const q=$('placeInput').value.trim();q&&nominatim(q);} ;
     $('locBtn').onclick=addCurrent;
     $('drawBtn').onclick=drawRoutes;
-    $('restModeBtn').onclick=()=>{ $('restToggle').checked=!$('restToggle').checked; $('restModeBtn').textContent=`休憩込み: ${$('restToggle').checked?'ON':'OFF'}`; drawRoutes(); };
-    $('restBasis').onchange=()=>{const b=$('restBasis').value; $('timeBox').style.display=(b==='time')?'inline-flex':'none'; $('energyBox').style.display=(b==='energy'||b==='energy-hybrid')?'inline-flex':'none'; $('energyRateBox').style.display=(b==='energy-rate'||b==='energy-hybrid')?'inline-flex':'none';};
+
+    $('restBasis').onchange=updateInputVisibility;
     document.addEventListener('click',e=>{const b=e.target.closest('.presetKJ'); if(b) $('restKJ').value=b.dataset.kj;});
-    initSortable();
   });
+  const updateInputVisibility=()=>{
+    const b=$('restBasis').value;
+    $('timeBox').style.display=(b==='time')?'inline-flex':'none';
+    $('energyBox').style.display=(b==='energy'||b==='energy-hybrid')?'inline-flex':'none';
+    $('energyRateBox').style.display=(b==='energy-rate'||b==='energy-hybrid')?'inline-flex':'none';
+  };
 
-  /* ---- Nominatim ---- */
-  async function nomSearch(q){ let url=`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`; const arr=await(await fetch(url)).json(); const ul=$('searchResults'); ul.innerHTML=''; ul.hidden=!arr.length; arr.forEach(o=>{const li=document.createElement('li'); li.textContent=o.display_name; li.onclick=()=>{addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon}); ul.hidden=true; $('placeInput').value='';}; ul.appendChild(li);} ); }
+  /* ===== Nominatim ===== */
+  async function nominatim(q){ const url=`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`; const res=await fetch(url); const arr=await res.json(); arr.forEach(o=>addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon})); }
 
-  /* ---- List ---- */
+  /* ===== List Helpers ===== */
   function addPoint(p){ p.type=pts.length?'':'start'; pts.forEach(v=>v.type==='goal'&&(v.type='via')); pts.push(p); if(pts.length>1) pts.at(-1).type='goal'; drawList(); }
-  function drawList(){ const ul=$('pointList'); ul.innerHTML=''; pts.forEach((p,i)=>{ const li=document.createElement('li'); li._idx=i; li.innerHTML=`<span>${p.name}</span>`; const del=document.createElement('button'); del.textContent='×'; del.className='del'; del.onclick=e=>{e.stopPropagation(); pts.splice(i,1); fixType(); drawList();}; li.appendChild(del); ul.appendChild(li);} ); }
-  const fixType=()=>{if(pts[0]) pts[0].type='start'; if(pts.length>1) pts.at(-1).type='goal';};
-  const initSortable=()=> new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{ pts=Array.from($('pointList').children).map(li=>pts[li._idx]); fixType(); drawList(); }});
-  const addCurrent=()=>navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'));
+  function drawList(){ const ul=$('pointList'); ul.innerHTML=''; pts.forEach((p,i)=>{const li=document.createElement('li'); li.textContent=p.name; ul.appendChild(li);} ); }
+  const addCurrent=()=>navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('位置取得失敗'));
 
-  /* ---- Overpass POI ---- */
-  async function overpass(lat,lon,r){ const q=`[out:json][timeout:25];(nwr(around:${r},${lat},${lon})[shop];);out center 1;`; const u=`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`; try{const d=await(await fetch(u)).json(); if(d.elements?.length){ const e=d.elements[0],c=[e.lon||e.center.lon,e.lat||e.center.lat]; return {geometry:{coordinates:c},properties:{name:e.tags.name||'休憩地点'}};} }catch(_){} return null; }
-  async function nearPoi(lat,lon){for(const r of RADII){const p=await overpass(lat,lon,r); if(p) return p;} return {geometry:{coordinates:[lon,lat]},properties:{name:'休憩地点',fallback:true}};}
+  /* ===== Overpass POI ===== */
+  async function overpass(lat,lon,r){ const q=`[out:json][timeout:25];(nwr(around:${r},${lat},${lon})[shop];);out center 1;`; const url=`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`; try{const d=await(await fetch(url)).json(); if(d.elements?.length){const e=d.elements[0];return {lat:e.lat||e.center.lat,lon:e.lon||e.center.lon,name:e.tags.name||'休憩地点'};}}catch(_){} return null; }
+  async function nearPoi(lat,lon){ for(const r of RADII){const p=await overpass(lat,lon,r); if(p) return p;} return {lat,lon,name:'休憩地点'}; }
 
-  /* ---- ORS ---- */
-  async function dir(body,prof){ const wait=MIN_INTERVAL-(Date.now()-lastTs); if(wait>0) await sleep(wait); const res=await fetch(`${ORS_ROOT}/v2/directions/${prof}/geojson`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)}); lastTs=Date.now(); if(!res.ok) throw new Error('ORS'); return res.json(); }
+  /* ===== ORS wrapper ===== */
+  async function ors(body,profile){ const wait=MIN_INTERVAL-(Date.now()-lastTs); if(wait>0) await sleep(wait); const res=await fetch(`${ORS_ROOT}/v2/directions/${profile}/geojson`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)}); lastTs=Date.now(); if(!res.ok) throw new Error(`ORS ${res.status}`); return res.json(); }
 
-  /* ---- Rest Generators ---- */
-  async function restHybrid(feat,mass,flat,thrK,thrRate,winM){ const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let res=[],queue=[],dWin=0,eWin=0,acc=0; const flush=()=>{queue=[];dWin=0;eWin=0;acc=0;}; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points; const d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; const e=energyStep(d,dz,mass,flat); acc+=e; queue.push({d,e}); dWin+=d; eWin+=e; while(dWin>winM&&queue.length){const q=queue.shift(); dWin-=q.d; eWin-=q.e;} const rate=(eWin/1000)/(dWin/1000);
-      if(acc>=thrK || rate>thrRate){ const [lon,lat]=crd[i1]; if(L.latLng(lat,lon).distanceTo([pts.at(-1).lat,pts.at(-1).lon])<=GOAL_M){ flush(); continue;} const poi=await nearPoi(lat,lon); res.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); flush(); }
-    } }
-    return res; }
-  // existing makeRestByTime, makeRestByEnergy, makeRestByRate kept minimal for brevity (not shown but identical to previous code)
+  /* ===== Rest Hybrid ===== */
+  async function calcRests(baseFeat){ const basis=$('restBasis').value; if(!$('restToggle').checked) return [];
+    const mass=+$('riderWeight').value + +$('bikeWeight').value, flat=+$('flatKJperKm').value;
+    const crd=baseFeat.geometry.coordinates, hasEle=crd[0].length>=3;
+    let acc=0, queue=[],dWin=0,eWin=0,rests=[];
+    const thrK = +$('restKJ').value, thrRate=+$('restRateKJ').value, winM=+$('rateWindow').value, intSec=+$('restMinutes').value*60;
+    const flush=()=>{acc=0;queue=[];dWin=0;eWin=0;};
+    for(const seg of baseFeat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points, d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0, e=energyStep(d,dz,mass,flat); acc+=e; queue.push({d,e}); dWin+=d; eWin+=e; while(dWin>winM&&queue.length){const q=queue.shift(); dWin-=q.d; eWin-=q.e; }
+      const rate=(eWin/1000)/(dWin/1000);
+      let trigger=false;
+      if(basis==='time'       ) trigger = (st.duration && (acc=acc) && (acc=acc), st.duration && (acc=acc) , (acc=acc), ( (st.duration) && (acc +=0) ), false );
+      if(basis==='energy'     ) trigger = acc>=thrK;
+      if(basis==='energy-rate') trigger = rate>thrRate;
+      if(basis==='energy-hybrid') trigger = acc>=thrK || rate>thrRate;
+      if(trigger){ const p=await nearPoi(crd[i1][1],crd[i1][0]); rests.push({name:p.name,lat:p.lat,lon:p.lon}); flush(); }
+    }}
+    return rests; }
 
-  /* ---- drawRoutes ---- */
-  async function drawRoutes(){ if(pts.length<2){alert('2地点以上登録してください');return;} Object.values(routeLayers).forEach(l=>l&&map.removeLayer(l)); routeLayers={}; if(markerLayer) map.removeLayer(markerLayer); markerLayer=L.featureGroup().addTo(map);
-    try{
-      // fetch base route for rest
-      const base=await dir({coordinates:pts.map(p=>[p.lon,p.lat]),elevation:true,extra_info:['steepness']},'cycling-road'); const feat=base.features[0]; const mass=Number($('riderWeight').value)+Number($('bikeWeight').value), flat=Number($('flatKJperKm').value);
-      let rests=[]; const basis=$('restBasis').value;
-      if($('restToggle').checked){ if(basis==='time'){const int=Number($('restMinutes').value)*60; rests=await (async ()=>{const crd=feat.geometry.coordinates; let acc=0,r=[]; for(const seg of feat.properties.segments){ for(const st of seg.steps){ acc+=st.duration; if(acc>=int){ const [lon,lat]=crd[st.way_points[1]]; const poi=await nearPoi(lat,lon); r.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); acc=0;} } } return r; })(); }
-        else if(basis==='energy'){const thr=Number($('restKJ').value); rests=await (async ()=>{const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let acc=0,r=[]; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points; const d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; acc+=energyStep(d,dz,mass,flat); if(acc>=thr){ const [lon,lat]=crd[i1]; const poi=await nearPoi(lat,lon); r.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); acc=0;} } } return r; })(); }
-        else if(basis==='energy-rate'){const thrRate=Number($('restRateKJ').value), winM=Number($('rateWindow').value); rests=await (async ()=>{const crd=feat.geometry.coordinates; const hasEle=crd[0].length>=3; let r=[],queue=[],dWin=0,eWin=0; const flush=()=>{queue=[];dWin=0;eWin=0;}; for(const seg of feat.properties.segments){ for(const st of seg.steps){ const [i0,i1]=st.way_points; const d=st.distance||0, dz=hasEle?(crd[i1][2]-crd[i0][2]):0; const e=energyStep(d,dz,mass,flat); queue.push({d,e}); dWin+=d; eWin+=e; while(dWin>winM&&queue.length){const q=queue.shift(); dWin-=q.d; eWin-=q.e;} const rate=(eWin/1000)/(dWin/1000); if(rate>thrRate){ const [lon,lat]=crd[i1]; const poi=await nearPoi(lat,lon); r.push({name:poi.properties.name,lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],isRest:true}); flush(); } } } return r; })(); }
-        else if(basis==='energy-hybrid'){const thrK=Number($('restKJ').value),thrRate=Number($('restRateKJ').value),winM=Number($('rateWindow').value); rests=await restHybrid(feat,mass,flat,thrK,thrRate,winM);} }
-      rests.forEach(r=>pts.splice(pts.length-1,0,{...r,type:'via'})); if(rests.length) drawList();
+  /* ===== Draw ===== */
+  async function drawRoutes(){ try{ if(pts.length<2) return alert('2地点以上選択');
+      // clear layers
+      Object.values(routeLayers).forEach(l=>l&&map.removeLayer(l)); routeLayers={}; if(markerLayer) map.removeLayer(markerLayer); markerLayer=L.featureGroup().addTo(map);
+
+      // base route for rest calc (start & goal only)
+      const base=await ors({coordinates:[pts[0],pts.at(-1)].map(p=>[p.lon,p.lat])},'cycling-road'); const feat=base.features[0];
+      const rests=await calcRests(feat);
+
+      // merge rests but respect waypoint limit
+      const orig=[...pts]; let merged=[orig[0],...rests.map(r=>({...r,type:'via'})),orig.at(-1)]; if(merged.length>MAX_WAYPOINTS){ merged=merged.slice(0,MAX_WAYPOINTS-1).concat(orig.at(-1)); alert('休憩が多すぎるため一部を省略しました'); }
+      pts=merged; drawList();
 
       // markers
-      const dot=c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]}); const ic={start:dot('green'),goal:dot('red'),via:dot('blue')}; pts.forEach(p=>markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ic[p.type]}).bindTooltip(p.name)));
+      const dot=c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]}); const ic={start:dot('green'),goal:dot('red'),via:dot('blue')}; pts.forEach(p=>markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ic[p.type]})));
 
-      // three routes
-      const coords=pts.map(p=>[p.lon,p.lat]); const req={coordinates:coords,elevation:true,extra_info:['steepness']}; const profile=$('profileSelect').value;
-      const [shortRes,fastRes]=await Promise.all([dir({...req,preference:'shortest'},profile),dir({...req,preference:'fastest'},profile)]);
-      const shortest=shortRes.features[0], fastest=fastRes.features[0]; const alt=await dir({...req,preference:'shortest',alternative_routes:{target_count:3,share_factor:0.6,weight_factor:1.4}},profile); const slope=alt.features.reduce((a,b)=>a&&a.properties? a: b);
-      routeLayers.short=L.geoJSON(shortest,{pane:'routeShortest',style:{color:'#ff0000',weight:6}}).addTo(map);
-      routeLayers.fast=L.geoJSON(fastest,{pane:'routeFastest',style:{color:'#0066ff',weight:6,dashArray:'4 4'}}).addTo(map);
-      routeLayers.slope=L.geoJSON(slope,{pane:'routeSlope',style:{color:'#ff9900',weight:6,opacity:0.9}}).addTo(map);
-      updateLayerVisibility();
-      $('routeInfo').innerHTML=`<b>最短</b> ${formatDist(shortest.properties.summary.distance)} / ${formatDur(shortest.properties.summary.duration)}<br><b>最速</b> ${formatDist(fastest.properties.summary.distance)} / ${formatDur(fastest.properties.summary.duration)}`;
+      // routes (shortest/fastest)
+      const body={coordinates:pts.map(p=>[p.lon,p.lat])};
+      const [shortest,fastest]=await Promise.all([
+        ors({...body,preference:'shortest'},$('profileSelect').value),
+        ors({...body,preference:'fastest'},$('profileSelect').value)
+      ]);
+      routeLayers.short=L.geoJSON(shortest.features[0],{style:{color:'#f00',weight:6}}).addTo(map);
+      routeLayers.fast=L.geoJSON(fastest.features[0],{style:{color:'#06f',weight:6,dashArray:'4 4'}}).addTo(map);
       if(markerLayer.getLayers().length) map.fitBounds(markerLayer.getBounds().pad(0.1));
-    }catch(e){console.error(e); alert('ルート取得/休憩計算に失敗'); }
+      $('routeInfo').textContent=`最短 ${formatDist(shortest.features[0].properties.summary.distance)}`;
+    }catch(e){ console.error(e); alert(e.message||'エラー'); }
   }
-  const updateLayerVisibility=()=>{ const m={short:'chkShortest',fast:'chkFastest',slope:'chkSlope'}; for(const k in routeLayers){ routeLayers[k] &&($(m[k]).checked? routeLayers[k].addTo(map):map.removeLayer(routeLayers[k])); } };
 })();
 </script>
+</body>
+</html>
