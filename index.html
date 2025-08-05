@@ -3,276 +3,103 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>自転車ルート比較 + 自動休憩 v6.3 (clean)</title>
+  <title>自転車ルート比較 + 自動休憩 v6.3 (fix‑init)</title>
 
-  <!-- Libraries --------------------------------------------------------- -->
+  <!-- Libraries -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
-  <!-- Styles ------------------------------------------------------------- -->
+  <!-- Styles -->
   <style>
-    body          { margin: 0; font-family: system-ui, sans-serif; }
-    #map          { height: 500px; width: 100%; }
-    #controls     { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; background: #f7f7f7; }
-    #pointList    { list-style: none; margin: 0; padding: 0; }
-    #pointList li { display: flex; align-items: center; justify-content: space-between;
-                    padding: 4px 8px; border: 1px solid #ccc; background: #fafafa;
-                    margin-bottom: 4px; cursor: move; }
-    button.del    { background: #d9534f; color: #fff; border: none; border-radius: 4px;
-                    padding: 0 6px; font-size: 12px; }
-
-    /* 検索候補 */
-    #searchResults      { position: absolute; z-index: 1000; width: 260px; max-height: 200px;
-                          overflow-y: auto; margin: 4px 0 0; padding: 0; list-style: none;
-                          border: 1px solid #ccc; background: #fff; }
-    #searchResults li   { padding: 4px 8px; cursor: pointer; }
-    #searchResults li:hover { background: #ececec; }
-
-    /* 汎用 */
-    .group       { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .presetKJ    { border: 1px solid #ccc; border-radius: 14px; padding: 2px 8px;
-                   font-size: .85em; background: #fff; cursor: pointer; }
-    #summary     { padding: 8px; background: #fafafa; border-top: 1px solid #ddd;
-                   font-size: .9rem; }
+    body{margin:0;font-family:system-ui,sans-serif}
+    #map{height:500px;width:100%}
+    #controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#f7f7f7}
+    #pointList{list-style:none;margin:0;padding:0}
+    #pointList li{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #ccc;background:#fafafa;margin-bottom:4px;cursor:move}
+    button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0 6px;font-size:12px}
+    #searchResults{position:absolute;z-index:1000;width:260px;max-height:200px;overflow-y:auto;margin:4px 0 0;padding:0;list-style:none;border:1px solid #ccc;background:#fff}
+    #searchResults li{padding:4px 8px;cursor:pointer}
+    #searchResults li:hover{background:#ececec}
+    .group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .presetKJ{border:1px solid #ccc;border-radius:14px;padding:2px 8px;font-size:.85em;background:#fff;cursor:pointer}
+    #summary{padding:8px;background:#fafafa;border-top:1px solid #ddd;font-size:.9rem}
   </style>
 </head>
 <body>
-
-  <!-- Controls ----------------------------------------------------------- -->
+  <!-- Controls -->
   <div id="controls">
-    <input id="placeInput" placeholder="地名・住所" style="width: 260px" autocomplete="off">
-    <button id="searchBtn">検索</button>
+    <input id="placeInput" placeholder="地名・住所" style="width:260px" autocomplete="off"><button id="searchBtn">検索</button>
     <button id="locBtn">現在地追加</button>
-
-    <input id="restToggle" type="checkbox" hidden checked>
-    <button id="restModeBtn">休憩込み: ON</button>
-
-    <label>基準
-      <select id="restBasis">
-        <option value="time">時間</option>
-        <option value="energy">累積 kJ</option>
-        <option value="energy-rate">kJ/km</option>
-        <option value="energy-hybrid" selected>ハイブリッド</option>
-      </select>
-    </label>
-
-    <!-- 各基準用入力 -->
-    <span id="timeBox" class="group" style="display: none;">
-      <label>間隔 <input id="restMinutes" type="number" value="60" style="width: 70px"> 分</label>
-    </span>
-
-    <span id="energyBox" class="group">
-      <label>累積 <input id="restKJ" type="number" value="500" style="width: 90px"> kJ</label>
-      <button class="presetKJ" data-kj="400">400</button>
-      <button class="presetKJ" data-kj="600">600</button>
-    </span>
-
-    <span id="energyRateBox" class="group" style="display: none;">
-      <label>レート <input id="restRateKJ" type="number" value="28" style="width: 70px"> kJ/km</label>
-      <label>窓幅 <input id="rateWindow" type="number" value="500" style="width: 70px"> m</label>
-    </span>
-
-    <select id="profileSelect">
-      <option value="cycling-road" selected>ロード</option>
-      <option value="cycling-regular">一般車</option>
-    </select>
+    <input id="restToggle" type="checkbox" hidden checked><button id="restModeBtn">休憩込み: ON</button>
+    <label>基準<select id="restBasis"><option value="time">時間</option><option value="energy">累積kJ</option><option value="energy-rate">kJ/km</option><option value="energy-hybrid" selected>ハイブリッド</option></select></label>
+    <span id="timeBox" class="group" style="display:none"><label>間隔<input id="restMinutes" type="number" value="60" style="width:70px"> 分</label></span>
+    <span id="energyBox" class="group"><label>累積<input id="restKJ" type="number" value="500" style="width:90px"> kJ</label><button class="presetKJ" data-kj="400">400</button><button class="presetKJ" data-kj="600">600</button></span>
+    <span id="energyRateBox" class="group" style="display:none"><label>レート<input id="restRateKJ" type="number" value="28" style="width:70px"> kJ/km</label><label>窓幅<input id="rateWindow" type="number" value="500" style="width:70px"> m</label></span>
+    <select id="profileSelect"><option value="cycling-road" selected>ロード</option><option value="cycling-regular">一般車</option></select>
     <button id="drawBtn">ルート表示</button>
   </div>
 
-  <!-- Rider / Bike ------------------------------------------------------- -->
-  <div class="section">
-    <div class="group">
-      <label>体重 <input id="riderWeight" type="number" value="65" style="width: 80px"> kg</label>
-      <label>バイク <input id="bikeWeight" type="number" value="10" style="width: 80px"> kg</label>
-    </div>
-    <details>
-      <summary>平坦係数 (kJ/km)</summary>
-      <input id="flatKJperKm" type="number" value="18" style="width: 90px">
-    </details>
-  </div>
+  <!-- Rider/Bike -->
+  <div class="section"><div class="group"><label>体重 <input id="riderWeight" type="number" value="65" style="width:80px"> kg</label><label>バイク <input id="bikeWeight" type="number" value="10" style="width:80px"> kg</label></div><details><summary>平坦係数 (kJ/km)</summary><input id="flatKJperKm" type="number" value="18" style="width:90px"></details></div>
 
-  <!-- Lists & Map -------------------------------------------------------- -->
   <ul id="pointList"></ul>
   <ul id="searchResults" hidden></ul>
   <div id="map"></div>
-
   <div id="summary"><div id="routeInfo"></div></div>
 
-  <!-- Script ------------------------------------------------------------- -->
-  <script>
-    (() => {
-      /* ─────────── Config & Utils ─────────── */
-      const ORS_KEY   = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';                          // ★ 必ずご自身のキーを入力
-      const ORS_ROOT  = 'https://api.openrouteservice.org';
-      const THROTTLE  = 1300;                        // ms between ORS hits
-      const MAX_WP    = 50;                          // ORS waypoint limit
-      const RADII     = [800, 1600, 3000];           // POI search radii
+<script>
+(()=>{
+  /* ---------------- Config & Utils ---------------- */
+  const ORS_KEY='5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';
+  const ORS_ROOT='https://api.openrouteservice.org';
+  const TH=1300, MAX_WP=50;
+  const $=id=>document.getElementById(id);
+  const sleep=t=>new Promise(r=>setTimeout(r,t));
+  const fmtD=d=>(d/1000).toFixed(2)+' km';
+  const fmtT=s=>{const m=Math.round(s/60);return m<60?m+' 分':Math.floor(m/60)+' 時間 '+m%60+' 分';};
 
-      const $  = id => document.getElementById(id);
-      const ms = t  => new Promise(r => setTimeout(r, t));
-      const fmtD = d => (d / 1000).toFixed(2) + ' km';
-      const fmtT = s => {
-        const m = Math.round(s / 60);
-        return m < 60 ? `${m} 分` : `${Math.floor(m / 60)} 時間 ${m % 60} 分`;
-      };
+  /* ---------------- State ------------------------- */
+  let pts=[], map, layer, routes={}, last=0;
 
-      /* ─────────── State ─────────── */
-      let pts = [];
-      let map, markerLayer, routes = {}, lastORS = 0;
+  /* ---------------- Init (run immediately) -------- */
+  init();
+  function init(){
+    // Map
+    map=L.map('map').setView([35,135],7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap'}).addTo(map);
+    ['routeShortest','routeFastest'].forEach((p,i)=>map.createPane(p).style.zIndex=690+i*10);
 
-      /* ─────────── Init ─────────── */
-      window.addEventListener('DOMContentLoaded', () => {
-        // Map -------------------------------------------------------------
-        map = L.map('map').setView([35, 135], 7);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '©OpenStreetMap' }).addTo(map);
-        ['routeShortest', 'routeFastest'].forEach((p, i) => map.createPane(p).style.zIndex = 690 + i * 10);
+    // Bindings
+    $('#searchBtn').onclick=searchPlace;
+    $('#placeInput').addEventListener('keyup',e=>e.key==='Enter'&&searchPlace());
+    document.addEventListener('pointerdown',e=>{if(!e.target.closest('#searchResults')&&!e.target.closest('#placeInput'))$('#searchResults').hidden=true;});
+    $('#locBtn').onclick=()=>navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('位置取得失敗'));
+    $('#drawBtn').onclick=drawRoutes;
+    $('#restBasis').onchange=toggleBoxes;
+    $('#restModeBtn').onclick=()=>{$('#restToggle').checked=!$('#restToggle').checked;$('#restModeBtn').textContent='休憩込み: '+($('#restToggle').checked?'ON':'OFF');};
+    document.addEventListener('click',e=>{const b=e.target.closest('.presetKJ');b&&($('#restKJ').value=b.dataset.kj);});
+    new Sortable($('#pointList'),{animation:150,handle:'span',onEnd:()=>{pts=[...$('#pointList').children].map(li=>pts.find(p=>p.name===li.querySelector('span').textContent));fixTypes();}});
+    toggleBoxes();
+  }
 
-        // UI bindings -----------------------------------------------------
-        $('#searchBtn').onclick    = searchPlace;
-        $('#placeInput').addEventListener('keyup', e => e.key === 'Enter' && searchPlace());
-        document.addEventListener('pointerdown', e => {
-          if (!e.target.closest('#searchResults') && !e.target.closest('#placeInput')) $('#searchResults').hidden = true;
-        });
+  function toggleBoxes(){const m=$('#restBasis').value;$('#timeBox').style.display=m==='time'?'inline-flex':'none';$('#energyBox').style.display=/energy/.test(m)?'inline-flex':'none';$('#energyRateBox').style.display=/rate/.test(m)?'inline-flex':'none';}
 
-        $('#locBtn').onclick       = () => navigator.geolocation.getCurrentPosition(p => addPoint({ name: '現在地', lat: p.coords.latitude, lon: p.coords.longitude }), () => alert('位置取得失敗'));
-        $('#drawBtn').onclick      = drawRoutes;
-        $('#restBasis').onchange   = toggleInputs;
-        $('#restModeBtn').onclick  = () => {
-          $('#restToggle').checked = !$('#restToggle').checked;
-          $('#restModeBtn').textContent = `休憩込み: ${$('#restToggle').checked ? 'ON' : 'OFF'}`;
-        };
-        document.addEventListener('click', e => {
-          const btn = e.target.closest('.presetKJ');
-          if (btn) $('#restKJ').value = btn.dataset.kj;
-        });
+  /* -------- Nominatim Search --------- */
+  async function searchPlace(){const q=$('#placeInput').value.trim();if(!q)return;const arr=await(await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`)).json();const ul=$('#searchResults');ul.innerHTML='';ul.hidden=!arr.length;arr.forEach(o=>{const li=document.createElement('li');li.textContent=o.display_name;li.onpointerdown=e=>e.stopPropagation();li.onclick=()=>{addPoint({name:o.display_name,lat:+o.lat,lon:+o.lon});ul.hidden=true;$('#placeInput').value='';};ul.appendChild(li);});}
 
-        initSortable();
-        toggleInputs();
-      });
+  /* -------- Point List --------------- */
+  function addPoint(p){p.type=pts.length?'':'start';pts.forEach(v=>v.type==='goal'&&(v.type='via'));pts.push(p);pts.length>1&&(pts.at(-1).type='goal');renderList();}
+  function renderList(){const ul=$('#pointList');ul.innerHTML='';pts.forEach((p,i)=>{const li=document.createElement('li');li.innerHTML=`<span>${p.name}</span>`;const del=document.createElement('button');del.className='del';del.textContent='×';del.onclick=e=>{e.stopPropagation();pts.splice(i,1);fixTypes();renderList();};li.appendChild(del);ul.appendChild(li);});}
+  const fixTypes=()=>{pts[0]&&(pts[0].type='start');pts.length>1&&(pts.at(-1).type='goal');};
 
-      function toggleInputs () {
-        const mode = $('#restBasis').value;
-        $('#timeBox').style.display       = mode === 'time'        ? 'inline-flex' : 'none';
-        $('#energyBox').style.display     = /energy/.test(mode)    ? 'inline-flex' : 'none';
-        $('#energyRateBox').style.display = /rate/.test(mode)      ? 'inline-flex' : 'none';
-      }
+  /* -------- ORS wrapper -------------- */
+  async function ors(body){if(!ORS_KEY){alert('キー未設定');throw'';}const wait=TH-(Date.now()-last);if(wait>0)await sleep(wait);const r=await fetch(`${ORS_ROOT}/v2/directions/cycling-road/geojson`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});last=Date.now();if(!r.ok)throw`ORS ${r.status}`;return r.json();}
 
-      /* ─────────── Nominatim search ──────── */
-      async function searchPlace () {
-        const q = $('#placeInput').value.trim();
-        if (!q) return;
-
-        const url   = `https://nominatim.openstreetmap.org/search?format=json&limit=10&q=${encodeURIComponent(q)}`;
-        const places = await (await fetch(url)).json();
-
-        const ul = $('#searchResults');
-        ul.innerHTML = '';
-        ul.hidden    = !places.length;
-
-        places.forEach(p => {
-          const li = document.createElement('li');
-          li.textContent   = p.display_name;
-          li.onpointerdown = e => e.stopPropagation();
-          li.onclick       = () => {
-            addPoint({ name: p.display_name, lat: +p.lat, lon: +p.lon });
-            ul.hidden = true; $('#placeInput').value = '';
-          };
-          ul.appendChild(li);
-        });
-      }
-
-      /* ─────────── Point list management ─── */
-      function addPoint (p) {
-        p.type = pts.length ? '' : 'start';
-        pts.forEach(pt => pt.type === 'goal' && (pt.type = 'via'));
-        pts.push(p);
-        if (pts.length > 1) pts.at(-1).type = 'goal';
-        renderList();
-      }
-
-      function renderList () {
-        const ul = $('#pointList');
-        ul.innerHTML = '';
-        pts.forEach((p, i) => {
-          const li = document.createElement('li');
-          li.innerHTML = `<span>${p.name}</span>`;
-          const del = document.createElement('button');
-          del.className = 'del'; del.textContent = '×';
-          del.onclick = e => { e.stopPropagation(); pts.splice(i, 1); fixTypes(); renderList(); };
-          li.appendChild(del); ul.appendChild(li);
-        });
-      }
-
-      function fixTypes () {
-        if (pts[0]) pts[0].type = 'start';
-        if (pts.length > 1) pts.at(-1).type = 'goal';
-      }
-
-      function initSortable () {
-        new Sortable($('#pointList'), {
-          animation: 150, handle: 'span',
-          onEnd: () => {
-            pts = [...$('#pointList').children].map(li => pts.find(p => p.name === li.querySelector('span').textContent));
-            fixTypes();
-          }
-        });
-      }
-
-      /* ─────────── ORS helper ───────────── */
-      async function callORS (body, profile) {
-        if (!ORS_KEY) { alert('ORS APIキーが設定されていません'); throw new Error('API Key'); }
-
-        const wait = THROTTLE - (Date.now() - lastORS);
-        if (wait > 0) await ms(wait);
-
-        const r = await fetch(`${ORS_ROOT}/v2/directions/${profile}/geojson`, {
-          method  : 'POST',
-          headers : { 'Content-Type': 'application/json', 'Authorization': ORS_KEY },
-          body    : JSON.stringify(body)
-        });
-        lastORS = Date.now();
-        if (!r.ok) throw new Error(`ORS ${r.status}`);
-        return r.json();
-      }
-
-      /* ─────────── Draw routes ──────────── */
-      async function drawRoutes () {
-        try {
-          if (pts.length < 2)  { alert('2地点以上指定してください'); return; }
-          if (pts.length > MAX_WP) { alert('地点が多すぎます'); return; }
-
-          // Clear previous layers
-          Object.values(routes).forEach(l => l && map.removeLayer(l));
-          routes = {};
-          markerLayer && map.removeLayer(markerLayer);
-          markerLayer = L.featureGroup().addTo(map);
-
-          // Markers
-          const icon = c => new L.Icon({ iconUrl: `https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`, iconSize: [32,32], iconAnchor: [16,32] });
-          pts.forEach(pt => markerLayer.addLayer(L.marker([pt.lat, pt.lon], { icon: icon(pt.type === 'start' ? 'green' : pt.type === 'goal' ? 'red' : 'blue') })));
-
-          // ORS shortest / fastest
-          const profile = $('#profileSelect').value;
-          const coords  = pts.map(p => [p.lon, p.lat]);
-
-          const [shortest, fastest] = await Promise.all([
-            callORS({ coordinates: coords, preference: 'shortest' }, profile),
-            callORS({ coordinates: coords, preference: 'fastest'  }, profile)
-          ]);
-
-          // Draw ----------------------------------------------------------
-          routes.short = L.geoJSON(shortest.features[0], { pane: 'routeShortest', style: { color: '#f00', weight: 6 } }).addTo(map);
-          routes.fast  = L.geoJSON(fastest.features[0],  { pane: 'routeFastest',  style: { color: '#06f', weight: 6, dashArray: '4 4' } }).addTo(map);
-
-          map.fitBounds(markerLayer.getBounds().pad(0.08));
-          $('#routeInfo').textContent = `最短 ${fmtD(shortest.features[0].properties.summary.distance)} / ${fmtT(shortest.features[0].properties.summary.duration)}`;
-        } catch (err) {
-          console.error(err);
-          alert(err.message || err);
-        }
-      }
-    })();
-  </script>
+  /* -------- Draw Routes -------------- */
+  async function drawRoutes(){try{if(pts.length<2)return alert('2地点以上');if(pts.length>MAX_WP)return alert('多すぎ');Object.values(routes).forEach(l=>l&&map.removeLayer(l));routes={};layer&&map.removeLayer(layer);layer=L.featureGroup().addTo(map);const icon=c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});pts.forEach(p=>layer.addLayer(L.marker([p.lat,p.lon],{icon:icon(p.type==='start'?'green':p.type==='goal'?'red':'blue')})));
+  const coords=pts.map(p=>[p.lon,p.lat]);const short=await ors({coordinates:coords,preference:'shortest'});const fast=await ors({coordinates:coords,preference:'fastest'});routes.s=L.geoJSON(short.features[0],{pane:'routeShortest',style:{color:'#f00',weight:6}}).addTo(map);routes.f=L.geoJSON(fast.features[0],{pane:'routeFastest',style:{color:'#06f',weight:6,dashArray:'4 4'}}).addTo(map);map.fitBounds(layer.getBounds().pad(0.08));$('#routeInfo').textContent=`最短 ${fmtD(short.features[0].properties.summary.distance)} / ${fmtT(short.features[0].properties.summary.duration)}`;}catch(e){console.error(e);alert(e);}}
+})();
+</script>
 </body>
 </html>
