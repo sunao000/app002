@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋自動休憩 PNG 出力 v5.4.6</title>
+<title>自転車ルート比較＋自動休憩 PNG 出力 v5.4.7</title>
 
 <!-- ライブラリ -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
@@ -116,8 +116,12 @@ const CLOSE_TO_GOAL_M = 500;
 /* ===== ヘルパ ===== */
 const $ = id=>document.getElementById(id);
 const sleep = ms=>new Promise(r=>setTimeout(r,ms));
-const icon  = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
-const ICONS = {start:icon('green'),via:icon('blue'),goal:icon('red')};
+
+// マーカーアイコン（休憩は黄色）
+const iconUrl = c => `https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`;
+const icon  = c=>new L.Icon({iconUrl:iconUrl(c),iconSize:[32,32],iconAnchor:[16,32]});
+const ICONS = {start:icon('green'),via:icon('blue'),goal:icon('red'),rest:icon('yellow')};
+
 const formatDist = d=>(d/1000).toFixed(2)+' km';
 const formatDur  = s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
 const steepSum   = f=>(f.properties.extras.steepness.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
@@ -130,9 +134,14 @@ let lastFastest=null,lastMass=0,lastFlat=18;
 window.addEventListener('DOMContentLoaded',()=>{
   map=L.map('map').setView([34.07,134.55],11);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap'}).addTo(map);
+
+  // ルート用 pane（ライン）— マーカーより下のまま
   map.createPane('routeSlope').style.zIndex=690;
   map.createPane('routeShortest').style.zIndex=700;
   map.createPane('routeFastest').style.zIndex=710;
+
+  // ★ マーカー専用 pane：ルートより前面に出す（休憩ピンが確実に見える）
+  map.createPane('markersTop').style.zIndex=800;
 
   $('searchBtn').onclick   = ()=>{const q=$('placeInput').value.trim();q&&nomSearch(q);};
   $('locBtn').onclick      = addCurrent;
@@ -326,7 +335,7 @@ function downloadLineChart({labels, values, xlabel, ylabel, filename}){
   },120);
 }
 
-/* ===== ルート描画（ピン問題修正済み） ===== */
+/* ===== ルート描画（休憩ピン表示修正済み） ===== */
 async function drawRoutes(){
   $('btnDownloadTime').disabled=true;
   $('btnDownloadDist').disabled=true;
@@ -363,11 +372,12 @@ async function drawRoutes(){
     }
   }catch(e){console.warn('休憩地点取得失敗',e);}
 
-  // --- マーカー描画（休憩挿入後！）
-  markerLayer=L.layerGroup().addTo(map);
+  // --- マーカー描画（★ markersTop pane に載せて最前面に）
+  markerLayer=L.layerGroup([], { pane:'markersTop' }).addTo(map);
   pts.forEach(p=>{
-    const ic=p.type==='start'?ICONS.start:p.type==='goal'?ICONS.goal:ICONS.via;
-    const mk=L.marker([p.lat,p.lon],{icon:ic}).bindTooltip(p.name+(p.isRest?'（休憩）':''));
+    const ic = p.isRest ? ICONS.rest : (p.type==='start'?ICONS.start:p.type==='goal'?ICONS.goal:ICONS.via);
+    const mk=L.marker([p.lat,p.lon],{icon:ic,pane:'markersTop',zIndexOffset:1000})
+      .bindTooltip(p.name+(p.isRest?'（休憩）':''),{direction:'top',offset:[0,-20]});
     markerLayer.addLayer(mk);
   });
 
