@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋自動休憩 PNG 出力 v5.8.0</title>
+<title>自転車ルート比較＋自動休憩 PNG 出力 v5.7.0</title>
 
 <!-- ライブラリ -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
@@ -34,8 +34,6 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 .cat-group{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 .cat-group label{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:16px;padding:4px 8px;background:#fff}
 .badge{font-weight:600}
-.num{width:86px}
-.sel{height:30px}
 </style>
 </head>
 <body>
@@ -54,23 +52,23 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   <button id="btnDownloadDist"  disabled>グラフ PNG（距離×累積kJ）</button>
 
   <label>基準
-    <select id="restBasis" class="sel">
+    <select id="restBasis">
       <option value="time">時間</option>
       <option value="energy" selected>kJ</option>
     </select>
   </label>
 
   <span id="timeBox" class="group" style="display:none">
-    <label>間隔 <input id="restMinutes" class="num" type="number" value="60" min="15" step="5"> 分</label>
+    <label>間隔 <input id="restMinutes" type="number" value="60" min="15" step="5" style="width:70px"> 分</label>
   </span>
   <span id="energyBox" class="group">
-    <label>しきい値 <input id="restKJ" class="num" type="number" value="500" min="100" step="50"> kJ</label>
+    <label>しきい値 <input id="restKJ" type="number" value="500" min="100" step="50" style="width:90px"> kJ</label>
     <button type="button" class="presetKJ" data-kj="400">400</button>
     <button type="button" class="presetKJ" data-kj="500">500</button>
     <button type="button" class="presetKJ" data-kj="650">650</button>
   </span>
 
-  <select id="profileSelect" class="sel">
+  <select id="profileSelect">
     <option value="cycling-road" selected>ロードバイク</option>
     <option value="cycling-regular">自転車（一般）</option>
   </select>
@@ -83,8 +81,8 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 
 <div class="section">
   <div class="group">
-    <label>体重 <input id="riderWeight" class="num" type="number" value="65" min="30" max="150" step="0.5"> kg</label>
-    <label>バイク重量 <input id="bikeWeight" class="num" type="number" value="10" min="5" max="30" step="0.1"> kg</label>
+    <label>体重 <input id="riderWeight" type="number" value="65" min="30" max="150" step="0.5" style="width:80px"> kg</label>
+    <label>バイク重量 <input id="bikeWeight" type="number" value="10" min="5" max="30" step="0.1" style="width:80px"> kg</label>
   </div>
 
   <!-- 休憩カテゴリのON/OFF -->
@@ -98,23 +96,9 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
     </div>
   </div>
 
-  <!-- ★ 近接スキップのUI -->
-  <div class="group">
-    <div class="muted">近接スキップ設定</div>
-    <label>出発から <input id="skipStartM" class="num" type="number" value="400" min="0" step="50"> m 以内は休憩しない</label>
-    <label>目的地から <input id="skipGoalM"  class="num" type="number" value="500" min="0" step="50"> m 以内は休憩しない</label>
-    <label>スキップ時
-      <select id="skipBehavior" class="sel">
-        <option value="reset" selected>完全リセット</option>
-        <option value="keep">維持（リセットしない）</option>
-        <option value="debounce">デバウンス（20%だけ残す）</option>
-      </select>
-    </label>
-  </div>
-
   <details><summary>詳細設定（簡易エネルギーモデル）</summary>
     <div class="muted">平坦係数 (kJ/km)</div>
-    <label>平坦係数 <input id="flatKJperKm" class="num" type="number" value="18" min="10" max="30" step="0.5"> kJ/km</label>
+    <label>平坦係数 <input id="flatKJperKm" type="number" value="18" min="10" max="30" step="0.5" style="width:90px"> kJ/km</label>
   </details>
 </div>
 
@@ -133,11 +117,15 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 </div>
 
 <script>
-/* ===== 定数（APIなど） ===== */
+/* ===== 定数 ===== */
 const ORS_KEY  = '5b3ce3597851110001cf62481af47799d9c344bf86dd4b340f9f9ff9';  // ←★ORS Directions を使うなら設定
 const ORS_ROOT = 'https://api.openrouteservice.org';
+
+/* POI取得は Overpass を使用（CORS可・キー不要） */
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-const RADII    = [800,1500,2500];   // POI検索半径（m）
+const RADII    = [800,1500,2500];   // 検索半径（m）
+const CLOSE_TO_GOAL_M  = 500;       // ゴール近くは休憩スキップ
+const CLOSE_TO_START_M = 400;       // ★出発近くも休憩スキップ（必要に応じ調整）
 
 /* ===== ヘルパ ===== */
 const $ = id=>document.getElementById(id);
@@ -151,11 +139,30 @@ const formatDist = d=>(d/1000).toFixed(2)+' km';
 const formatDur  = s=>{const m=Math.round(s/60);return m<60?`${m} 分`:`${Math.floor(m/60)} 時間 ${m%60} 分`;};
 const steepSum   = f=>(f.properties.extras.steepness.values||[]).reduce((s,e)=>s+Math.abs(e[2]||0),0);
 
+const havDist = (lat1,lon1,lat2,lon2)=>{
+  const R=6371000, toRad=x=>x*Math.PI/180;
+  const dlat=toRad(lat2-lat1), dlon=toRad(lon2-lon1);
+  const a = Math.sin(dlat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dlon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+};
+
+// HTML/表示用
+function escapeHTML(s){
+  return String(s).replace(/[&<>"']/g, m =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])
+  );
+}
+function shortName(s, max=36){
+  let t = String(s).split(',')[0].replace(/\s*\(.+?\)\s*/g,'').trim();
+  if(t.length > max) t = t.slice(0, max-1) + '…';
+  return t;
+}
 const fmtLL = (lat,lon)=>`${(+lat).toFixed(5)}, ${(+lon).toFixed(5)}`;
 
 /* ===== 状態 ===== */
 let pts=[], map, markerLayer, routeLayers={}, lastDirTs=0;
 let lastFastest=null,lastMass=0,lastFlat=18;
+// グラフ注釈用に、最終決定した経路作成時点のポイント配列を保持
 let lastPtsForCharts = [];
 
 // Overpass 簡易キャッシュ（約100mグリッド + カテゴリマスク）
@@ -167,9 +174,11 @@ window.addEventListener('DOMContentLoaded',()=>{
   map=L.map('map').setView([34.07,134.55],11);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap'}).addTo(map);
 
+  // ルート用 pane（ライン）
   map.createPane('routeSlope').style.zIndex=690;
   map.createPane('routeShortest').style.zIndex=700;
   map.createPane('routeFastest').style.zIndex=710;
+  // マーカー最前面 pane
   map.createPane('markersTop').style.zIndex=800;
 
   $('searchBtn').onclick   = ()=>{const q=$('placeInput').value.trim();q&&nomSearch(q);};
@@ -189,15 +198,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   $('restModeBtn').onclick = ()=>{ $('restToggle').checked=!$('restToggle').checked; $('restModeBtn').textContent='休憩込み: '+($('restToggle').checked?'ON':'OFF'); drawRoutes(); };
   $('restBasis').onchange  = e=>{ const v=e.target.value; $('timeBox').style.display=v==='time'?'inline-flex':'none'; $('energyBox').style.display=v==='energy'?'inline-flex':'none'; };
-
-  // プリセットボタン
-  document.addEventListener('click',e=>{const b=e.target.closest('.presetKJ');if(b){$('restKJ').value=b.dataset.kj;}});
-
-  // 近接スキップUI変更時は即再描画（好みでOFFにしてもOK）
-  ['skipStartM','skipGoalM','skipBehavior','catConv','catMichi','catSuper','catDrug'].forEach(id=>{
-    $(id).addEventListener('change', ()=>drawRoutes());
-  });
-
+  document.addEventListener('click',e=>{const b=e.target.closest('.presetKJ');if(b) $('restKJ').value=b.dataset.kj;});
   initSortable();
 });
 
@@ -223,7 +224,11 @@ function drawList(){
   const ul=$('pointList');ul.innerHTML='';
   pts.forEach((p,i)=>{
     const li=document.createElement('li');li._idx=i;
-    const typeBadge = p.isRest ? '🟡休憩' : (p.type==='start' ? '🟢出発' : (p.type==='goal' ? '🔴目的' : '🔵経由'));
+
+    const typeBadge = p.isRest
+      ? '🟡休憩'
+      : (p.type==='start' ? '🟢出発' : (p.type==='goal' ? '🔴目的' : '🔵経由'));
+
     const mainLabel = p.isRest
       ? (() => {
           const brand = p.brand || p.operator || '';
@@ -232,8 +237,17 @@ function drawList(){
           return `${typeBadge} <span class="badge">${escapeHTML(shortName(p.name||'休憩'))}</span>${kind}${btxt}`;
         })()
       : `${typeBadge}: ${escapeHTML(shortName(p.name||''))}`;
+
     const sub = p.isRest ? `<div class="sub">📍 ${fmtLL(p.lat,p.lon)}</div>` : '';
-    li.innerHTML=`<div class="row"><span>${mainLabel}</span><button class="del">×</button></div>${sub}`;
+
+    li.innerHTML=`
+      <div class="row">
+        <span>${mainLabel}</span>
+        <button class="del">×</button>
+      </div>
+      ${sub}
+    `;
+
     li.querySelector('.del').onclick=e=>{e.stopPropagation();pts.splice(i,1);fixType();drawList();};
     ul.appendChild(li);
   });
@@ -248,7 +262,7 @@ function addCurrent(){navigator.geolocation.getCurrentPosition(p=>addPoint({name
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});if(!r.ok) throw new Error(r.status);return r.json();}
 async function dir(body,profile){const wait=1100-(Date.now()-lastDirTs);if(wait>0) await sleep(wait);const d=await post(`${ORS_ROOT}/v2/directions/${profile}/geojson`,body);lastDirTs=Date.now();return d;}
 
-/* ===== Overpass（カテゴリON/OFF対応） ===== */
+/* ===== Overpass で POI 検索（カテゴリON/OFF対応） ===== */
 function getCategoryMask(){
   // ビットマスク：conv=1, michi=2, super=4, drug=8
   return ( $('catConv').checked ? 1:0 )
@@ -276,7 +290,9 @@ async function overpassFetch(query, timeoutMs=7000){
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
     return await res.json();
-  }finally{ clearTimeout(timer); }
+  }finally{
+    clearTimeout(timer);
+  }
 }
 function friendlyKindFromTags(tags){
   if(tags.shop==='convenience') return 'コンビニ';
@@ -296,50 +312,58 @@ async function nearPoi(lat,lon){
   const mask = getCategoryMask();
   const ck = cacheKey(lat,lon,mask);
   if(poiCache.has(ck)) return poiCache.get(ck);
+
+  // すべてOFFなら即フォールバック
   if(mask===0){
     const fallback = { geometry:{coordinates:[lon,lat]}, properties:{name:'休憩', kind:'', brand:'', operator:''} };
-    poiCache.set(ck, fallback); return fallback;
+    poiCache.set(ck, fallback);
+    return fallback;
   }
+
   for(const r of RADII){
     const filters = buildOverpassFilters(mask, r, lat, lon);
-    if(!filters.length) continue;
-    const query = `[out:json][timeout:10];(${filters.join('\n')});out body 30;`;
+    if(filters.length===0) continue;
+
+    const query = `[out:json][timeout:10];
+      (
+        ${filters.join('\n')}
+      );
+      out body 30;`;
+
     try{
       const data = await overpassFetch(query, 7000);
       const els = data.elements||[];
       if(els.length){
+        // 「道の駅」最優先 → それ以外は距離最小
         let candidates = els;
-        const michi = els.filter(n => /道の駅/.test((n.tags&&n.tags.name)||'')); if(michi.length) candidates = michi;
+        const michi = els.filter(n => /道の駅/.test((n.tags&&n.tags.name)||''));
+        if(michi.length) candidates = michi;
+
         let best = null, bestD = Infinity;
         for(const n of candidates){
-          const d = L.latLng(lat,lon).distanceTo([n.lat,n.lon]);
+          const d = havDist(lat,lon,n.lat,n.lon);
           if(d < bestD){ best = n; bestD = d; }
         }
         const tags = best.tags||{};
         const kind = friendlyKindFromTags(tags);
         const nm   = bestName(tags);
-        const poi = { geometry:{coordinates:[best.lon,best.lat]}, properties:{ name:nm, kind, brand:tags.brand||'', operator:tags.operator||'' } };
-        poiCache.set(ck, poi); return poi;
+        const poi = {
+          geometry:{coordinates:[best.lon,best.lat]},
+          properties:{ name:nm, kind, brand:tags.brand||'', operator:tags.operator||'' }
+        };
+        poiCache.set(ck, poi);
+        return poi;
       }
-    }catch(e){ /* 次半径へ */ }
+    }catch(e){/* 次半径へ */ }
   }
   const fallback = { geometry:{coordinates:[lon,lat]}, properties:{name:'休憩', kind:'', brand:'', operator:''} };
-  poiCache.set(ck, fallback); return fallback;
+  poiCache.set(ck, fallback);
+  return fallback;
 }
+const isCloseToGoal =(lat,lon)=>{const g=pts.at(-1);return g?L.latLng(lat,lon).distanceTo([g.lat,g.lon])<=CLOSE_TO_GOAL_M:false;};
+const isCloseToStart=(lat,lon)=>{const s=pts[0];   return s?L.latLng(lat,lon).distanceTo([s.lat,s.lon])<=CLOSE_TO_START_M:false;};
 
-/* ===== 近接スキップ（UIの値を使う） ===== */
-const getSkipStartM = ()=> Math.max(0, Number($('skipStartM').value)||0);
-const getSkipGoalM  = ()=> Math.max(0, Number($('skipGoalM').value)||0);
-const isCloseToGoal =(lat,lon)=>{const g=pts.at(-1);return g?L.latLng(lat,lon).distanceTo([g.lat,g.lon])<=getSkipGoalM():false;};
-const isCloseToStart=(lat,lon)=>{const s=pts[0];   return s?L.latLng(lat,lon).distanceTo([s.lat,s.lon])<=getSkipStartM():false;};
-function applySkipPolicy(acc, thr){
-  const mode = $('skipBehavior').value;
-  if(mode==='keep') return acc;               // そのまま
-  if(mode==='debounce') return Math.max(0, thr*0.2); // 20%だけ残す
-  return 0;                                   // reset（既定）
-}
-
-/* ===== 休憩ロジック ===== */
+/* ===== 休憩ロジック（出発/目的地近接スキップ） ===== */
 const energyStepKJ=(d,dz,m,flat)=>flat*(d/1000)+Math.max(dz,0)*m*9.80665/1000;
 async function makeRest(feat,basis,mass,flat,thr){
   const crd=feat.geometry.coordinates,segs=feat.properties.segments,hasEle=crd[0].length>=3;
@@ -350,18 +374,16 @@ async function makeRest(feat,basis,mass,flat,thr){
 
     if(acc>=thr){
       const [lon,lat]=crd[i1];
-      // ① トリガー地点が近接
-      if(isCloseToStart(lat,lon) || isCloseToGoal(lat,lon)){
-        acc = applySkipPolicy(acc, thr);
-        continue;
-      }
+
+      // 経路上の点が出発/目的地に近すぎればスキップ
+      if(isCloseToStart(lat,lon) || isCloseToGoal(lat,lon)){ acc=0; continue; }
+
       const poi=await nearPoi(lat,lon);
+
+      // 候補POI自体が近すぎてもスキップ
       const plat=poi.geometry.coordinates[1], plon=poi.geometry.coordinates[0];
-      // ② POI自体が近接
-      if(isCloseToStart(plat,plon) || isCloseToGoal(plat,plon)){
-        acc = applySkipPolicy(acc, thr);
-        continue;
-      }
+      if(isCloseToStart(plat,plon) || isCloseToGoal(plat,plon)){ acc=0; continue; }
+
       res.push({
         name:poi.properties.name||'休憩',
         lat:plat, lon:plon,
@@ -380,20 +402,13 @@ function tempShowChartsContainer(show){
   else    { charts.removeAttribute('style'); charts.style.display='none'; }
 }
 function prepareCanvasSize(canvas, w=1600, h=900){canvas.width=w;canvas.height=h;}
-function escapeHTML(s){
-  return String(s).replace(/[&<>"']/g, m =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])
-  );
-}
-function shortName(s, max=36){
-  let t = String(s).split(',')[0].replace(/\s*\(.+?\)\s*/g,'').trim();
-  if(t.length > max) t = t.slice(0, max-1) + '…';
-  return t;
-}
+
+/* セグメント境界（各経由点到達時）での累積T/Dから休憩注釈を作る */
 function extractRestMarkers(feature, ptsForChart){
   const segs = feature.properties.segments || [];
   let cumT=0, cumD=0;
   const out=[];
+  // pts.length = segs.length + 1
   for(let i=1;i<ptsForChart.length;i++){
     const s = segs[i-1] || {};
     cumT += s.duration || 0;
@@ -409,16 +424,23 @@ function extractRestMarkers(feature, ptsForChart){
   }
   return out;
 }
+
+/* 時間×累積kJ */
 function buildEnergyTimeSeriesBySteps(feature, mass, flat){
-  const coords = feature.geometry.coordinates, hasEle = coords[0].length >= 3;
-  let cumT = 0, cumE = 0; const tMin=[], eKJ=[];
+  const coords = feature.geometry.coordinates;
+  const hasEle = coords[0].length >= 3;
+  let cumT = 0, cumE = 0;
+  const tMin=[], eKJ=[];
   for(const seg of feature.properties.segments){
     for(const st of seg.steps){
-      const [i0,i1]=st.way_points;
-      const d=st.distance||0, dt=st.duration||0;
-      const dz=hasEle?((coords[i1][2]||0)-(coords[i0][2]||0)):0;
-      const dE=energyStepKJ(d,dz,mass,flat);
-      cumT+=dt; cumE+=dE; tMin.push((cumT/60).toFixed(2)); eKJ.push(+cumE.toFixed(1));
+      const [i0,i1] = st.way_points;
+      const d  = st.distance || 0;
+      const dt = st.duration || 0;
+      const dz = hasEle ? ((coords[i1][2]||0)-(coords[i0][2]||0)) : 0;
+      const dE = energyStepKJ(d,dz,mass,flat);
+      cumT += dt; cumE += dE;
+      tMin.push((cumT/60).toFixed(2));
+      eKJ .push(+cumE.toFixed(1));
     }
   }
   return { labels:tMin, values:eKJ, xlabel:'時間 (分)', ylabel:'累積エネルギー (kJ)', filename:'energy_over_time.png' };
@@ -428,16 +450,23 @@ function downloadEnergyGraphByTime(fastestFeature, mass, flat, restMarkers){
   const series = buildEnergyTimeSeriesBySteps(fastestFeature, mass, flat);
   downloadLineChart({...series, markers:restMarkers});
 }
+
+/* 距離×累積kJ */
 function buildEnergyDistanceSeriesBySteps(feature, mass, flat){
-  const coords = feature.geometry.coordinates, hasEle = coords[0].length >= 3;
-  let cumD = 0, cumE = 0; const km=[], eKJ=[];
+  const coords = feature.geometry.coordinates;
+  const hasEle = coords[0].length >= 3;
+  let cumD = 0, cumE = 0;
+  const km=[], eKJ=[];
   for(const seg of feature.properties.segments){
     for(const st of seg.steps){
-      const [i0,i1]=st.way_points;
-      const d=st.distance||0;
-      const dz=hasEle?((coords[i1][2]||0)-(coords[i0][2]||0)):0;
-      const dE=energyStepKJ(d,dz,mass,flat);
-      cumD+=d; cumE+=dE; km.push((cumD/1000).toFixed(2)); eKJ.push(+cumE.toFixed(1));
+      const [i0,i1] = st.way_points;
+      const d  = st.distance || 0;
+      const dz = hasEle ? ((coords[i1][2]||0)-(coords[i0][2]||0)) : 0;
+      const dE = energyStepKJ(d,dz,mass,flat);
+      cumD += d;      // m
+      cumE += dE;     // kJ
+      km .push((cumD/1000).toFixed(2));
+      eKJ.push(+cumE.toFixed(1));
     }
   }
   return { labels:km, values:eKJ, xlabel:'距離 (km)', ylabel:'累積エネルギー (kJ)', filename:'energy_over_distance.png' };
@@ -447,42 +476,63 @@ function downloadEnergyGraphByDistance(fastestFeature, mass, flat, restMarkers){
   const series = buildEnergyDistanceSeriesBySteps(fastestFeature, mass, flat);
   downloadLineChart({...series, markers:restMarkers});
 }
+
+/* 縦線注釈プラグイン付きライン生成＆PNG保存 */
 function downloadLineChart({labels, values, xlabel, ylabel, filename, markers=[]}){
   tempShowChartsContainer(true);
   const ec = $('energyChart'); prepareCanvasSize(ec, 1600, 900);
+
+  // 注釈用プラグイン
   const restPlugin = {
     id:'restMarkers',
     afterDatasetsDraw(chart, args, opts){
       const ms = (opts && opts.markers) || [];
       if(!ms.length) return;
       const {ctx, chartArea:{top,bottom}, scales:{x}} = chart;
-      ctx.save(); ctx.lineWidth = 1; ctx.strokeStyle = '#666'; ctx.fillStyle = '#000'; ctx.font = '12px system-ui';
+      ctx.save();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#666';
+      ctx.fillStyle = '#000';
+      ctx.font = '12px system-ui';
       ms.forEach(m=>{
         const xPos = x.getPixelForValue(m.xValue);
-        ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(xPos, top); ctx.lineTo(xPos, bottom); ctx.stroke(); ctx.setLineDash([]);
+        ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(xPos, top); ctx.lineTo(xPos, bottom); ctx.stroke();
+        ctx.setLineDash([]);
+        // ラベル（上端に表示）
+        const label = '休憩: ' + m.text;
         ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.fillText('休憩: ' + m.text, xPos + 6, top + 6);
+        ctx.fillText(label, xPos + 6, top + 6);
       });
       ctx.restore();
     }
   };
   Chart.register(restPlugin);
+
   const ch = new Chart(ec, {
     type: 'line',
     data: { labels, datasets: [{ label: ylabel, data: values, borderWidth:2, pointRadius:0 }] },
     options: {
       animation:false,
-      plugins:{ legend:{ display:false }, restMarkers:{ markers } },
-      scales:{ x:{ title:{ display:true, text: xlabel } }, y:{ title:{ display:true, text: ylabel } } }
+      plugins:{
+        legend:{ display:false },
+        restMarkers:{ markers }
+      },
+      scales:{
+        x:{ title:{ display:true, text: xlabel } },
+        y:{ title:{ display:true, text: ylabel } }
+      }
     }
   });
+
   setTimeout(()=>{
     ec.toBlob(b=>{
       if(!b){ alert('PNG 生成に失敗'); return; }
       const u=URL.createObjectURL(b);
       const a=document.createElement('a'); a.href=u; a.download=filename; a.click();
       setTimeout(()=>URL.revokeObjectURL(u),1000);
-      ch.destroy(); tempShowChartsContainer(false);
+      ch.destroy();
+      tempShowChartsContainer(false);
     },'image/png');
   },120);
 }
@@ -495,32 +545,35 @@ async function drawRoutes(){
 
   if(pts.length<2){alert('2地点以上登録してください');return;}
 
+  // 既存レイヤクリア
   Object.values(routeLayers).forEach(l=>l&&map.removeLayer(l)); routeLayers={};
   if(markerLayer) map.removeLayer(markerLayer);
 
   // 休憩を一旦除去（重複防止）
   pts = pts.filter(p => !p.isRest);
-  fixType(); drawList();
+  fixType();
+  drawList();
 
   const profile=$('profileSelect').value;
   const mass=Number($('riderWeight').value)+Number($('bikeWeight').value);
   const flat =Number($('flatKJperKm').value);
   const basis=$('restBasis').value;
-  const thr  = basis==='time' ? Number($('restMinutes').value)*60 : Number($('restKJ').value);
+  const thr  =basis==='time'?Number($('restMinutes').value)*60:Number($('restKJ').value);
 
+  // 休憩プレビュー（最速1回で計算）
   try{
     if($('restToggle').checked){
       const preview=await dir({coordinates:pts.map(p=>[p.lon,p.lat]),elevation:true,extra_info:['steepness'],preference:'fastest'},profile);
       const rests=await makeRest(preview.features[0],basis,mass,flat,thr);
       if(rests.length){
-        const insertPos=Math.max(pts.length-1,1);
+        const insertPos=Math.max(pts.length-1,1); // 目的地直前にまとめて
         pts.splice(insertPos,0,...rests);
         fixType(); drawList();
       }
     }
   }catch(e){console.warn('休憩地点取得失敗',e);}
 
-  // マーカー
+  // マーカー（最前面）
   markerLayer=L.layerGroup([], { pane:'markersTop' }).addTo(map);
   pts.forEach(p=>{
     const ic = p.isRest ? ICONS.rest : (p.type==='start'?ICONS.start:p.type==='goal'?ICONS.goal:ICONS.via);
@@ -559,8 +612,9 @@ async function drawRoutes(){
       `<b>勾配</b> ${formatDist(s3.distance)} / ${formatDur(s3.duration)}`;
     $('distanceScore').textContent=`距離差: ${(s2.distance-s1.distance).toFixed(0)} m`;
 
+    // グラフ用に保持
     lastFastest=fastest.features[0]; lastMass=mass; lastFlat=flat;
-    lastPtsForCharts = pts.map(p=>({...p}));
+    lastPtsForCharts = pts.map(p=>({...p})); // 参照切り離し
 
     $('btnDownloadTime').disabled=false;
     $('btnDownloadDist').disabled=false;
