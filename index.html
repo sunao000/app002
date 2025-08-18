@@ -226,8 +226,8 @@ function drawList(){
     const li=document.createElement('li');li._idx=i;
 
     const typeBadge = p.isRest
-      ? '🟡休憩'
-      : (p.type==='start' ? '🟢出発' : (p.type==='goal' ? '🔴目的' : '🔵経由'));
+      ? '休憩'
+      : (p.type==='start' ? '出発' : (p.type==='goal' ? '目的' : '経由'));
 
     const mainLabel = p.isRest
       ? (() => {
@@ -238,7 +238,7 @@ function drawList(){
         })()
       : `${typeBadge}: ${escapeHTML(shortName(p.name||''))}`;
 
-    const sub = p.isRest ? `<div class="sub">📍 ${fmtLL(p.lat,p.lon)}</div>` : '';
+    const sub = p.isRest ? `<div class="sub"> ${fmtLL(p.lat,p.lon)}</div>` : '';
 
     li.innerHTML=`
       <div class="row">
@@ -624,3 +624,4 @@ function updateLayerVisibility(){const m={short:'chkShortest',fast:'chkFastest',
 </script>
 </body>
 </html>
+
