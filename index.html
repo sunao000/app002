@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋自動休憩 PNG 出力 v5.6.0</title>
+<title>自転車ルート比較＋自動休憩 PNG 出力 v5.6.1</title>
 
 <!-- ライブラリ -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
@@ -16,7 +16,9 @@ body{margin:0;font-family:system-ui,sans-serif}
 #map{height:500px;width:100%}
 #controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:#f7f7f7}
 #pointList{list-style:none;margin:0;padding:0}
-#pointList li{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #ccc;background:#fafafa;margin-bottom:4px;cursor:move}
+#pointList li{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border:1px solid #ccc;background:#fafafa;margin-bottom:4px;cursor:move}
+#pointList li .row{display:flex;align-items:center;justify-content:space-between}
+#pointList li .sub{font-size:.85em;color:#666}
 button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0 6px;font-size:12px}
 #searchResults{position:absolute;z-index:1000;width:260px;max-height:200px;overflow-y:auto;margin:4px 0 0;padding:0;list-style:none;border:1px solid #ccc;background:#fff}
 #searchResults li{padding:4px 8px;cursor:pointer}
@@ -31,6 +33,7 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 #charts canvas{width:800px;height:400px}
 .cat-group{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 .cat-group label{display:flex;align-items:center;gap:6px;border:1px solid #ddd;border-radius:16px;padding:4px 8px;background:#fff}
+.badge{font-weight:600}
 </style>
 </head>
 <body>
@@ -82,7 +85,7 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
     <label>バイク重量 <input id="bikeWeight" type="number" value="10" min="5" max="30" step="0.1" style="width:80px"> kg</label>
   </div>
 
-  <!-- ★ 休憩カテゴリのON/OFF -->
+  <!-- 休憩カテゴリのON/OFF -->
   <div class="group">
     <div class="muted">休憩候補カテゴリ</div>
     <div class="cat-group">
@@ -153,12 +156,13 @@ function shortName(s, max=36){
   if(t.length > max) t = t.slice(0, max-1) + '…';
   return t;
 }
+const fmtLL = (lat,lon)=>`${(+lat).toFixed(5)}, ${(+lon).toFixed(5)}`;
 
 /* ===== 状態 ===== */
 let pts=[], map, markerLayer, routeLayers={}, lastDirTs=0;
 let lastFastest=null,lastMass=0,lastFlat=18;
 
-// Overpass 簡易キャッシュ（約100mグリッド）
+// Overpass 簡易キャッシュ（約100mグリッド + カテゴリマスク）
 const poiCache = new Map();
 const cacheKey = (lat,lon,mask)=>`${lat.toFixed(3)},${lon.toFixed(3)},${mask}`;
 
@@ -214,15 +218,35 @@ function drawList(){
       ? '🟡休憩'
       : (p.type==='start' ? '🟢出発' : (p.type==='goal' ? '🔴目的' : '🔵経由'));
 
-    const label = escapeHTML(shortName(p.name || (p.isRest?'休憩':'')));
-    li.innerHTML=`<span>${typeBadge}: ${label}</span>`;
-    const del=document.createElement('button');del.className='del';del.textContent='×';
+    // 1行目: バッジ + 名前（休憩は店種/ブランドも）
+    const mainLabel = p.isRest
+      ? (() => {
+          const brand = p.brand || p.operator || '';
+          const kind  = p.kind ? `（${p.kind}）` : '';
+          const btxt  = brand ? ` / ${brand}` : '';
+          return `${typeBadge} <span class="badge">${escapeHTML(shortName(p.name||'休憩'))}</span>${kind}${btxt}`;
+        })()
+      : `${typeBadge}: ${escapeHTML(shortName(p.name||''))}`;
+
+    // 2行目: 休憩のみ 緯度経度
+    const sub = p.isRest ? `<div class="sub">📍 ${fmtLL(p.lat,p.lon)}</div>` : '';
+
+    li.innerHTML=`
+      <div class="row">
+        <span>${mainLabel}</span>
+        <button class="del">×</button>
+      </div>
+      ${sub}
+    `;
+
+    const del=li.querySelector('.del');
     del.onclick=e=>{e.stopPropagation();pts.splice(i,1);fixType();drawList();};
-    ul.appendChild(li);li.appendChild(del);
+
+    ul.appendChild(li);
   });
 }
 function fixType(){if(pts[0])pts[0].type='start';if(pts.length>1)pts.at(-1).type='goal';}
-function initSortable(){new Sortable($('pointList'),{animation:150,handle:'span',onEnd:()=>{pts=Array.from($('pointList').children).map(li=>pts[li._idx]);fixType();drawList();}});}
+function initSortable(){new Sortable($('pointList'),{animation:150,handle:'.row',onEnd:()=>{pts=Array.from($('pointList').children).map(li=>pts[li._idx]);fixType();drawList();}});}
 
 /* ===== 現在地 ===== */
 function addCurrent(){navigator.geolocation.getCurrentPosition(p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),()=>alert('現在地取得失敗'));}
@@ -251,9 +275,8 @@ function buildOverpassFilters(mask, r, lat, lon){
     q.push(`node(around:${r},${lat},${lon})[shop=chemist];`);
     q.push(`node(around:${r},${lat},${lon})[amenity=pharmacy];`);
   }
-  if(mask & 2){ // 道の駅：名前に「道の駅」を含むものを優先
+  if(mask & 2){ // 道の駅：名前に「道の駅」を含むもの優先
     q.push(`node(around:${r},${lat},${lon})[name~"道の駅"];`);
-    // 典型タグも一応拾う
     q.push(`node(around:${r},${lat},${lon})[highway=rest_area][name~"道の駅"];`);
     q.push(`node(around:${r},${lat},${lon})[tourism=information][name~"道の駅"];`);
   }
@@ -281,6 +304,7 @@ function friendlyKindFromTags(tags){
   if(tags.shop==='chemist')     return 'ドラッグストア';
   if(tags.amenity==='pharmacy') return 'ドラッグストア';
   if((tags.highway==='rest_area'||tags.tourism==='information') && /道の駅/.test(tags.name||'')) return '道の駅';
+  if(/道の駅/.test(tags?.name||'')) return '道の駅';
   return '';
 }
 function bestName(tags){
@@ -295,7 +319,7 @@ async function nearPoi(lat,lon){
 
   // すべてOFFなら即フォールバック
   if(mask===0){
-    const fallback = { geometry:{coordinates:[lon,lat]}, properties:{name:'休憩'} };
+    const fallback = { geometry:{coordinates:[lon,lat]}, properties:{name:'休憩', kind:'', brand:'', operator:''} };
     poiCache.set(ck, fallback);
     return fallback;
   }
@@ -324,8 +348,13 @@ async function nearPoi(lat,lon){
           const d = havDist(lat,lon,n.lat,n.lon);
           if(d < bestD){ best = n; bestD = d; }
         }
-        const nm = bestName(best.tags||{});
-        const poi = { geometry:{coordinates:[best.lon,best.lat]}, properties:{ name: nm } };
+        const tags = best.tags||{};
+        const kind = friendlyKindFromTags(tags);
+        const nm   = bestName(tags);
+        const poi = {
+          geometry:{coordinates:[best.lon,best.lat]},
+          properties:{ name:nm, kind, brand:tags.brand||'', operator:tags.operator||'' }
+        };
         poiCache.set(ck, poi);
         return poi;
       }
@@ -333,7 +362,7 @@ async function nearPoi(lat,lon){
       // タイムアウト/一時障害時は次の半径へ
     }
   }
-  const fallback = { geometry:{coordinates:[lon,lat]}, properties:{name:'休憩'} };
+  const fallback = { geometry:{coordinates:[lon,lat]}, properties:{name:'休憩', kind:'', brand:'', operator:''} };
   poiCache.set(ck, fallback);
   return fallback;
 }
@@ -352,8 +381,17 @@ async function makeRest(feat,basis,mass,flat,thr){
       if(isClose(lat,lon)){acc=0;continue;}
       const poi=await nearPoi(lat,lon);
       if(isClose(poi.geometry.coordinates[1],poi.geometry.coordinates[0])){acc=0;continue;}
-      // ★ 名前をそのまま保持
-      res.push({name:poi.properties.name||'休憩',lat:poi.geometry.coordinates[1],lon:poi.geometry.coordinates[0],type:'via',isRest:true});
+      // 休憩点として、名称・ブランド等のメタ情報も保持
+      res.push({
+        name:poi.properties.name||'休憩',
+        lat:poi.geometry.coordinates[1],
+        lon:poi.geometry.coordinates[0],
+        type:'via',
+        isRest:true,
+        brand:poi.properties.brand||'',
+        operator:poi.properties.operator||'',
+        kind:poi.properties.kind||''
+      });
       acc=0;
     }
   }}return res;
@@ -474,8 +512,10 @@ async function drawRoutes(){
   markerLayer=L.layerGroup([], { pane:'markersTop' }).addTo(map);
   pts.forEach(p=>{
     const ic = p.isRest ? ICONS.rest : (p.type==='start'?ICONS.start:p.type==='goal'?ICONS.goal:ICONS.via);
+    const brandText = p.isRest ? (p.brand || p.operator || p.kind || '') : '';
+    const tipName = p.name + (brandText? ` / ${brandText}` : '');
     const mk=L.marker([p.lat,p.lon],{icon:ic,pane:'markersTop',zIndexOffset:1000})
-      .bindTooltip(p.name+(p.isRest?'（休憩）':''),{direction:'top',offset:[0,-20]});
+      .bindTooltip(`${tipName}${p.isRest?'（休憩）':''}\n${fmtLL(p.lat,p.lon)}`,{direction:'top',offset:[0,-20]});
     markerLayer.addLayer(mk);
   });
 
