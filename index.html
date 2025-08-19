@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>自転車ルート比較＋休憩（入口/出口＆各機能ON/OFF＋Snap＋休憩注記PNG） v5.8.1</title>
+<title>自転車ルート比較＋休憩（入口/出口＆各機能ON/OFF＋Snap＋休憩注記PNG） v5.9.0</title>
 
 <!-- ライブラリ -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
@@ -47,6 +47,7 @@ input[type=number]{width:90px}
 
   <button id="btnDownloadTime"  disabled>PNG（時間×累積kJ）</button>
   <button id="btnDownloadDist"  disabled>PNG（距離×累積kJ）</button>
+  <label class="chk"><input type="checkbox" id="showRestLabels"> 休憩ラベル表示</label>
 
   <label>基準
     <select id="restBasis">
@@ -84,7 +85,7 @@ input[type=number]{width:90px}
   </div>
 
   <details open><summary>休憩場所のカテゴリ（POI）</summary>
-    <div class="small">※ ORSのカテゴリID：コンビニ=451, スーパー=443, 道の駅=624, ドラッグ=518</div>
+    <div class="small">※ ORSカテゴリID：コンビニ=451, スーパー=443, 道の駅=624, ドラッグ=518</div>
     <div class="group" id="poiCats">
       <label class="chk"><input type="checkbox" data-cat="451" checked> コンビニ</label>
       <label class="chk"><input type="checkbox" data-cat="443" checked> スーパー</label>
@@ -256,7 +257,7 @@ function initSortable(){ new Sortable($('pointList'),{animation:150,handle:'span
 /* ===== 現在地 ===== */
 function addCurrent(){navigator.geolocation.getCurrentPosition(function(p){addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude});},function(){alert('現在地取得失敗');});}
 
-/* ===== ORS ===== */
+/* ===== ORS共通 ===== */
 async function post(url,body){
   var r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':ORS_KEY},body:JSON.stringify(body)});
   if(!r.ok) throw new Error(r.status); return r.json();
@@ -266,33 +267,23 @@ async function dir(body,profile){
   var d=await post(ORS_ROOT+'/v2/directions/'+profile+'/geojson',body); lastDirTs=Date.now(); return d;
 }
 
-/* ── ORS: ルート用スナップ（道路へ吸着） ───────────────────────────── */
+/* ── ルート入力点スナップ（道路へ吸着） ── */
 async function snapPoints(points, profile, radius){
   radius = radius || 250; // 探索半径
   var url = ORS_ROOT + '/v2/snap/' + profile + '/json';
-  var body = {
-    locations: points.map(function(p){ return [p.lon, p.lat]; }),
-    radius: radius
-  };
+  var body = { locations: points.map(function(p){ return [p.lon, p.lat]; }), radius: radius };
   try{
-    var r = await fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization': ORS_KEY},
-      body: JSON.stringify(body)
-    });
+    var r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json','Authorization': ORS_KEY}, body: JSON.stringify(body) });
     if(!r.ok) throw new Error('snap '+r.status);
     var data = await r.json();
     var locs = (data && data.locations) ? data.locations : [];
-    return points.map(function(p, idx){
-      var s = locs[idx];
-      if(s && s.location && s.location.length>=2){
-        return { lat: s.location[1], lon: s.location[0] };
-      }
-      return { lat: p.lat, lon: p.lon };
+    return points.map(function(p, i){
+      var s = locs[i];
+      return (s && s.location) ? {lat:s.location[1], lon:s.location[0]} : {lat:p.lat, lon:p.lon};
     });
   }catch(e){
     console.warn('snap failed', e);
-    return points.map(function(p){ return { lat:p.lat, lon:p.lon }; });
+    return points.map(function(p){ return {lat:p.lat, lon:p.lon}; });
   }
 }
 
@@ -390,7 +381,6 @@ function movingMedian(a, win){
     var w=a.slice(s,e+1).slice().sort(function(x,y){return x-y;});
     r.push(w[Math.floor(w.length/2)]);
   }
-  返
   return r;
 }
 function movingAverage(a, win){
@@ -530,13 +520,19 @@ async function nearPoiForwardSnap(cand, categoryIds, coords, cum){
   return {lat:cand.lat,lon:cand.lon,name:'休憩'};
 }
 
-/* ====== ★休憩注記プラグイン（Chart.js） ====== */
+/* ====== 休憩注記プラグイン（破線のみ／任意でラベル） ====== */
 const RestAnno = {
   id: 'restAnno',
   afterDatasetsDraw(chart, args, pluginOpts){
     const marks = (pluginOpts && pluginOpts.restMarks) || [];
     if(!marks.length) return;
-    const ctx = chart.ctx;
+
+    const showLabels = !!(pluginOpts && pluginOpts.showLabels);
+    const dash       = (pluginOpts && pluginOpts.dash) || [6,6];
+    const color      = (pluginOpts && pluginOpts.lineColor) || '#bbb';
+    const lw         = (pluginOpts && pluginOpts.lineWidth) || 1;
+
+    const ctx  = chart.ctx;
     const area = chart.chartArea;
     const meta = chart.getDatasetMeta(0);
 
@@ -548,24 +544,26 @@ const RestAnno = {
       if(!el) return;
       const x = el.x;
 
-      ctx.setLineDash([4,4]);
-      ctx.strokeStyle = '#999';
+      ctx.setLineDash(dash);
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = lw;
       ctx.beginPath();
       ctx.moveTo(x, area.top);
       ctx.lineTo(x, area.bottom);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const text = '休憩: ' + (m.name || '');
-      const tw = ctx.measureText(text).width;
-      const bx = x + 6, by = area.top + 6;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillRect(bx, by, tw + 8, 18);
-
-      ctx.fillStyle = '#333';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, bx + 4, by + 9);
+      if(showLabels){
+        const text = '休憩: ' + (m.name || '');
+        const tw = ctx.measureText(text).width;
+        const bx = x + 6, by = area.top + 6;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillRect(bx, by, tw + 8, 18);
+        ctx.fillStyle = '#333';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, bx + 4, by + 9);
+      }
     });
 
     ctx.restore();
@@ -573,7 +571,7 @@ const RestAnno = {
 };
 if (typeof Chart !== 'undefined') Chart.register(RestAnno);
 
-/* ====== ★休憩→X軸インデックス変換 ====== */
+/* ===== 休憩→X軸インデックス変換 ===== */
 function buildCumTimeByCoord(feature){
   const coords = feature.geometry.coordinates;
   const segs = (feature.properties.segments||[]);
@@ -613,8 +611,8 @@ function buildRestMarksByDistance(feature, labelsKM, restPts){
 }
 function buildRestMarksByTime(feature, labelsMin, restPts){
   const coords = feature.geometry.coordinates;
-  const T = buildCumTimeByCoord(feature); // sec
-  const nums = labelsMin.map(function(s){return +s;}); // min
+  const T = buildCumTimeByCoord(feature);
+  const nums = labelsMin.map(function(s){return +s;});
   const marks = [];
 
   (restPts||[]).forEach(function(r){
@@ -676,14 +674,9 @@ function downloadLineChart(obj){
   var ec = $('energyChart'); 
   prepareCanvasSize(ec,1600,900);
 
-  var datasets = [{
-    label: obj.ylabel,
-    data: obj.values,
-    borderWidth: 2,
-    pointRadius: 0
-  }];
+  var datasets = [{ label: obj.ylabel, data: obj.values, borderWidth: 2, pointRadius: 0 }];
 
-  var cfg = {
+  var ch = new Chart(ec, {
     type: 'line',
     data: { labels: obj.labels, datasets: datasets },
     options: {
@@ -694,12 +687,17 @@ function downloadLineChart(obj){
       },
       plugins: {
         legend: { display: false },
-        restAnno: { restMarks: obj.restMarks || [] } // ★休憩注記
+        restAnno: {
+          restMarks: obj.restMarks || [],
+          showLabels: $('showRestLabels') && $('showRestLabels').checked,
+          lineColor: '#bbb',
+          lineWidth: 1,
+          dash: [6,6]
+        }
       }
     }
-  };
+  });
 
-  var ch = new Chart(ec, cfg);
   setTimeout(function(){
     ec.toBlob(function(b){
       if(!b){ alert('PNG生成失敗'); return; }
@@ -881,7 +879,7 @@ async function drawRoutes(){
     markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ic}).bindTooltip(p.name+(p.isRest?'（休憩）':'')));
   });
 
-  // ────────── スナップ＋オプションでルート描画 ──────────
+  // スナップ後にルート描画
   try{
     var routingPts = await snapPoints(pts, profile, 250);
     var coordsRouting = routingPts.map(function(p){ return [p.lon, p.lat]; });
@@ -890,10 +888,7 @@ async function drawRoutes(){
       coordinates: coordsRouting,
       elevation: true,
       extra_info: ['steepness','surface','waytype'],
-      options: {
-        avoid_features: ['steps'],
-        profile_params: { weightings: { steepness_difficulty: 1 } }
-      }
+      options: { avoid_features: ['steps'], profile_params: { weightings: { steepness_difficulty: 1 } } }
     };
 
     var shortest = await dir(Object.assign({},base,{preference:'shortest'}),profile);
@@ -901,14 +896,9 @@ async function drawRoutes(){
     var slope    = shortest.features[0];
 
     if(coordsRouting.length===2){
-      var alt = await dir(Object.assign({},base,{
-        preference:'shortest',
-        alternative_routes:{ target_count:3, share_factor:0.6, weight_factor:1.4 }
-      }), profile);
+      var alt = await dir(Object.assign({},base,{ preference:'shortest', alternative_routes:{ target_count:3, share_factor:0.6, weight_factor:1.4 }}), profile);
       var feats = alt.features || [];
-      if(feats.length){
-        slope = feats.reduce(function(a,b){ return steepSum(a)<steepSum(b)?a:b; });
-      }
+      if(feats.length){ slope = feats.reduce(function(a,b){ return steepSum(a)<steepSum(b)?a:b; }); }
     }
 
     routeLayers.short=L.geoJSON(shortest.features[0],{pane:'routeShortest',style:{color:'#ff0000',weight:6}}).addTo(map);
