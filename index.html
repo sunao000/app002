@@ -630,7 +630,7 @@ function renderRestStats(totalDistM, totalTimeS, totalEnergyKJ, restPoints){
   const energyKJ = totalEnergyKJ;
 
   const rows = restPoints.map((p,i)=>{
-    const pctD = (p.routeD/distKm/10).toFixed(1); // % of distance
+    const pctD = ((p.routeD/1000) / distKm * 100).toFixed(1); // % of distance
     const pctT = p.timeS ? ((p.timeS/timeMin)*100).toFixed(1) : '–';
     const pctE = p.energyKJ ? ((p.energyKJ/energyKJ)*100).toFixed(1) : '–';
     return `休憩${i+1}: 距${pctD}% / 時${pctT}% / エ${pctE}%`;
@@ -1160,5 +1160,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
 </script>
 </body>
 </html>
+
 
 
