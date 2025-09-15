@@ -95,6 +95,14 @@ th,td{font-size:0.92rem}
   </details>
 </div>
 
+<!-- 休憩候補POI 一覧 -->
+<div class="section">
+  <details open>
+    <summary>休憩候補POI 一覧</summary>
+    <div id="restPoiList" class="small"></div>
+  </details>
+</div>
+  
 <!-- ────────── 休憩ロジック設定（簡素版） ────────── -->
 <div class="section">
   <div class="group">
@@ -277,6 +285,7 @@ window.addEventListener('DOMContentLoaded',function(){
     $('restToggle').checked=!$('restToggle').checked;
     $('restModeBtn').textContent='休憩込み: '+($('restToggle').checked?'ON':'OFF');
     drawRoutes();
+    renderRestPoiList();
   };
   $('restBasis').onchange  = function(e){
     var v=e.target.value;
@@ -381,6 +390,27 @@ function drawList(){
     ul.appendChild(li);
   });
 }
+function renderRestPoiList(){
+  const div = document.getElementById('restPoiList');
+  if(!div) return;
+
+  const restPts = pts.filter(p => p.isRest && Array.isArray(p.pois) && p.pois.length);
+  if(!restPts.length){
+    div.textContent = '休憩候補はありません。ルート表示後に休憩が挿入され、POI取得が完了するとここに表示されます。';
+    return;
+  }
+
+  const html = restPts.map((rp,i)=>{
+    const list = rp.pois.map(po=>{
+      const cat = po.cat==='conv'?'コンビニ':(po.cat==='super'?'スーパー':'ドラッグストア');
+      return `・[${cat}] ${po.name} (${po.lat.toFixed(5)}, ${po.lon.toFixed(5)})`;
+    }).join('<br>');
+    return `<b>休憩${i+1}: ${rp.name}</b><br>${list}`;
+  }).join('<hr>');
+
+  div.innerHTML = html;
+}
+
 function fixType(){ if(pts[0]) pts[0].type='start'; if(pts.length>1) pts[pts.length-1].type='goal'; }
 function initSortable(){ new Sortable($('pointList'),{animation:150,handle:'span',onEnd:function(){pts=Array.prototype.slice.call($('pointList').children).map(function(li){return pts[li._idx];}); fixType(); drawList();}}); }
 
@@ -1092,3 +1122,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
 </script>
 </body>
 </html>
+
