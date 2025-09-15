@@ -203,11 +203,11 @@ th,td{font-size:0.92rem}
   </details>
 </div>
 
-<!-- デバッグ表示 -->
+<!-- 休憩候補統計（追加表示） -->
 <div class="section">
   <details open>
-    <summary>休憩トリガ・ヒット状況（TRIGGER/HIT）</summary>
-    <div id="restDebug" class="small"></div>
+    <summary>休憩候補サマリー</summary>
+    <div id="restStats" class="small">未計算</div>
   </details>
 </div>
 
@@ -614,6 +614,31 @@ function renderRestDebug(log){
   });
   el.innerHTML = '<pre style="margin:0; white-space:pre-wrap;">' + rows.join('\n') + '</pre>';
 }
+/* ===== 休憩候補サマリー表示 ===== */
+function renderRestStats(totalDistM, totalTimeS, totalEnergyKJ, restPoints){
+  const box = document.getElementById('restStats');
+  if(!box) return;
+
+  if(!restPoints || !restPoints.length){
+    box.textContent = '休憩候補はありません';
+    return;
+  }
+
+  // 総距離(km),総時間(分),総エネルギー(kJ)
+  const distKm   = totalDistM/1000;
+  const timeMin  = totalTimeS/60;
+  const energyKJ = totalEnergyKJ;
+
+  const rows = restPoints.map((p,i)=>{
+    const pctD = (p.routeD/distKm/10).toFixed(1); // % of distance
+    const pctT = p.timeS ? ((p.timeS/timeMin)*100).toFixed(1) : '–';
+    const pctE = p.energyKJ ? ((p.energyKJ/energyKJ)*100).toFixed(1) : '–';
+    return `休憩${i+1}: 距${pctD}% / 時${pctT}% / エ${pctE}%`;
+  });
+
+  box.innerHTML = `総候補数: ${restPoints.length} 件<br>` + rows.join('<br>');
+}
+
 
 /* ===== 休憩ロジック：積算＆統計 併用 ===== */
 function mergeByRouteD(points, tolM){
@@ -817,6 +842,19 @@ async function drawRoutes(){
           fixType(); drawList();
         }
         if(typeof window._restDebug !== 'undefined'){ renderRestDebug(window._restDebug); }
+        // 総距離・時間・エネルギーを使って休憩候補のパーセンテージ表示
+const sum = feat.properties.summary || {};
+const totalDist = sum.distance || 0;    // m
+const totalTime = sum.duration || 0;    // s
+
+// 総エネルギー計算（平坦係数＋標高差）
+let totalEnergy = 0;
+const { segD, segDZ } = deriveSeriesFromCoords(feat);
+for(let i=0;i<segD.length;i++){ totalEnergy += energyStepKJ(segD[i], segDZ[i], mass, flat); }
+
+// restPoints には makeRestSimple が返した rests を利用
+renderRestStats(totalDist, totalTime, totalEnergy, rests);
+
 
         // 休憩地点まわりのPOI（リスト＆地図）
         if(poiLayer){ map.removeLayer(poiLayer); poiLayer = null; }
@@ -1122,4 +1160,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
 </script>
 </body>
 </html>
+
 
