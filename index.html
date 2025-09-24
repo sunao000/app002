@@ -363,7 +363,7 @@ async function drawRoutes(){
 
       // POI検索（半径固定・近い順に n 件）
       if ($('poiToggle').checked) {
-        const baseRadius = Number($('poiRadius').value) || 300;
+        const baseRadius = Number($('poiRadius').value) || 50000;
         const limit = Math.max(1, Number($('poiLimit').value) || 5);
         for (const r of rests) {
           try {
@@ -806,3 +806,4 @@ function updateRestListPanel(){
 </script>
 </body>
 </html>
+
