@@ -344,9 +344,12 @@ async function drawRoutes(){
 
     if (rests.length) {
       // リストに挿入（ゴール直前）
-      rests.forEach(r => pts.splice(pts.length-1, 0,
-        { name:'休憩', lat:r.lat, lon:r.lon, type:'via', isRest:true }));
-       restList.push({distance:(r.routeD/1000).toFixed(2), lat:r.lat, lon:r.lon});
+     rests.forEach(r => {
+       pts.splice(pts.length-1, 0,
+                  { name:'休憩', lat:r.lat, lon:r.lon, type:'via', isRest:true });
+        // ▼ r が有効なスコープ内で push
+        restList.push({distance:(r.routeD/1000).toFixed(2), lat:r.lat, lon:r.lon});
+      });
       drawList();
       updateRestListPanel(); // 休憩地点リスト表示更新
 
@@ -806,4 +809,5 @@ function updateRestListPanel(){
 </script>
 </body>
 </html>
+
 
