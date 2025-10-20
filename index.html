@@ -1219,9 +1219,10 @@ function showTop3Combos(resultList){
           map.flyTo([chosen.lat, chosen.lon], 17);
           L.popup().setLatLng([chosen.lat, chosen.lon]).setContent(chosen.name).openOn(map);
         };
-      }else{
-  // 補修後にここへ来るのは「本当に候補ゼロのトリガー」だけ
-  row.textContent = '・（候補なし）';
+      } else {
+  // 候補が一件も無いのか、単にその組み合わせで未採用なのかを判定
+  const hasAny = Array.isArray(g?.pois) && g.pois.length > 0;
+  row.textContent = hasAny ? '・（未採用）' : '・（候補なし）';
   row.style.color = '#777';
 }
 
@@ -1553,6 +1554,16 @@ function greedyTopKCandidates(restGroups, cumTotals, K = 3) {
       groups.push([null]); // 物理的に候補ゼロ
       continue;
     }
+    // ▼ _proj が無い POI には、休憩トリガー距離を暫定で入れて候補落ちを防ぐ
+if (g?.rest && Number.isFinite(g.rest.routeD)) {
+  pois.forEach(p => {
+    if (!p) return;
+    if (!p._proj || !Number.isFinite(p._proj.cumD)) {
+      p._proj = { cumD: Number(g.rest.routeD), cumT: NaN, cumE: NaN };
+    }
+  });
+}
+
 
     // --- 射影値 _proj が無い場合に補完 ---
     const needProj = pois.some(p => p && (!p._proj || !Number.isFinite(p._proj.cumD)));
@@ -1679,8 +1690,8 @@ function injectAlgoDebugButtons(cumTotals){
       log(`#${i+1}: score=${r.score.toFixed(4)}  segN=${r.stats.dist.length}`);
     });
     showTop3Combos(scored.map(s=>({
-      score:s.score, stats:s.stats, picksByTrigger:s.cnb??s.cmb, picks:s.cmb.filter(Boolean)
-    })));
+  score:s.score, stats:s.stats, picksByTrigger:s.cmb, picks:s.cmb.filter(Boolean)
+})));
   };
 
   document.getElementById('dbgRunBeam').onclick = ()=>{
@@ -1707,6 +1718,7 @@ function injectAlgoDebugButtons(cumTotals){
 </script>
 </body>
 </html>
+
 
 
 
