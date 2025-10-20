@@ -1471,12 +1471,25 @@ function beamSearch(restGroups, cumTotals, width = 3, minRest = 1, nullPenalty =
 
   for (let i = 0; i < restGroups.length; i++){
     const g = restGroups[i];
-    const valid = (g?.pois || []).filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+let pois = (g?.pois || []).slice();
 
-    // ★ 候補がある段では null を出さない（未採用分岐を作らない）
-    const cand = valid.length
-      ? (forbidNullWhenCand ? valid : [...valid, null])
-      : [null];
+// ▼ _proj が無い/不完全な POI には、休憩トリガーの routeD を使って暫定射影を付与
+if (pois.length && g?.rest && Number.isFinite(g.rest.routeD)) {
+  pois.forEach(p => {
+    if (!p) return;
+    if (!p._proj || !Number.isFinite(p._proj.cumD)) {
+      p._proj = { cumD: Number(g.rest.routeD), cumT: NaN, cumE: NaN };
+    }
+  });
+}
+
+// ここから先は従来と同じロジック
+const valid = pois.filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+
+const cand = valid.length
+  ? (forbidNullWhenCand ? valid : [...valid, null])
+  : [null];
+
 
     const next = [];
     for (const b of beams){
@@ -1623,6 +1636,11 @@ function dbgShowCumsAndProjections(){
 per-trigger candidates:
 ${counts || '(none)'}`;
   console.log("[ensureProjections] 射影を再計算しました");
+  // 追加：各トリガーの有効候補数をログ
+(restGroups||[]).forEach((g,i)=>{
+  const ok = (g?.pois||[]).filter(p=>p && p._proj && Number.isFinite(p._proj.cumD)).length;
+  console.log(`[projOK] trigger#${i+1}: all=${(g?.pois||[]).length}, projOK=${ok}`);
+});
 dbgShowCumsAndProjections();
 }
 
@@ -1689,6 +1707,7 @@ function injectAlgoDebugButtons(cumTotals){
 </script>
 </body>
 </html>
+
 
 
 
