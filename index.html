@@ -34,7 +34,9 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   <input id="placeInput" placeholder="地名・住所" style="width:260px">
   <button id="searchBtn">検索</button>
   <button id="locBtn">現在地追加</button>
-  <button id="drawBtn">ルート計算</button>
+  <button id="drawBtn">休憩場所検索</button>
+  <button id="solveCombBtn">ルート検索</button>
+
 
   <label>プロファイル
     <select id="profileSelect">
@@ -113,6 +115,21 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   </details>
 </div>
 
+<!-- 休憩トリガー別の候補POI -->
+<div class="section">
+  <>
+    <summary>休憩トリガー別の候補POI</summary>
+    <ol id="restPoiPanel" style="margin:0;padding-left:1.1rem;font-size:0.9rem"></ol>
+  </details>
+</div>
+
+<div class="section">
+  <details open>
+    <summary>デバッグ（累積・射影）</summary>
+    <div id="dbgCums" style="font-family:ui-monospace,monospace;white-space:pre-wrap;font-size:12px;"></div>
+  </details>
+</div>
+
 
 <!-- 地点リストと地図 -->
 <ul id="pointList"></ul>
@@ -125,6 +142,19 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   <button id="btnShowSlope">勾配考慮ルート表示</button>
 </div>
 
+<!-- ルート検索アルゴリズム -->
+<div class="section">
+  <label>探索アルゴリズム
+    <select id="algoSelect">
+      <option value="greedy" selected>等間隔貪欲（高速・ゼロAPI）</option>
+      <option value="beam3">ビームサーチ（幅3・ゼロAPI）</option>
+      <option value="bruteforce">総当たり（API多め・高精度）</option>
+    </select>
+  </label>
+  <small style="color:#666;margin-left:8px">※総当たりはAPI制限に注意</small>
+</div>
+
+
 <!-- サマリー -->
 <div id="summary">
   <div id="routeInfo">未計算</div>
@@ -136,6 +166,13 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   <h3>区間統計（各ルート）</h3>
   <div id="legSummaryAll" style="font-size:0.9rem;"></div>
 </div>
+
+<!-- 組み合わせ評価：上位3件 -->
+<div class="section">
+  <h3>最適な休憩組み合わせ（上位3件）</h3>
+  <div id="comboTop3" style="font-size:0.9rem;"></div>
+</div>
+
 
 <!-- グラフ描画＆ダウンロード -->
 <div id="charts" style="display:none;">
@@ -157,6 +194,14 @@ let routeData = { shortest:null, fastest:null, slope:null };
 
 // ▼▼ ここに追加：休憩リスト用変数 ▼▼
 let restList = []; // 休憩地点を保存
+let restGroups = []; 
+
+const ICON = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
+const ICONS = {start:ICON('green'),via:ICON('blue'),goal:ICON('red')};
+
+const OVERPASS_MIN_INTERVAL = 1800; // 1.8s（必要なら 2000～2500 まで上げてOK）
+let __overpassLastTs = 0;
+const __overpassCache = new Map();  // key=query文字列, value=JSON
 
 function $(id){return document.getElementById(id);}
 function formatDist(m){return (m/1000).toFixed(2)+' km';}
@@ -180,6 +225,126 @@ window.addEventListener('DOMContentLoaded',()=>{
       p=>addPoint({name:'現在地',lat:p.coords.latitude,lon:p.coords.longitude}),
       ()=>alert('現在地取得失敗'));
   $('drawBtn').onclick=drawRoutes;
+
+  $('solveCombBtn').onclick = async () => {
+  try {
+    // 0) 前提チェック
+    if (!routeData.fastest){
+      alert('先に「休憩場所検索」を実行してください。');
+      return;
+    }
+    if (!Array.isArray(restGroups) || !restGroups.length){
+      alert('休憩トリガーがありません。');
+      return;
+    }
+    const poiGroups = restGroups.map(g => Array.isArray(g.pois) ? g.pois : []);
+    if (poiGroups.every(a => !a.length)){
+      alert('各休憩トリガーにPOIがありません。POI設定（カテゴリ/半径/件数）を見直してください。');
+      return;
+    }
+    ensureProjections();
+    injectAlgoDebugButtons(window.__cumTotals);
+
+    // 1) 入力＆共有データ取得
+    const algo = $('algoSelect').value; // 'greedy' | 'beam3' | 'bruteforce'
+    const start = pts.find(p=>p.type==='start') || pts[0];
+    const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+    if (!start || !goal){
+      alert('スタート/ゴールが見つかりません。');
+      return;
+    }
+    const cumTotals = window.__cumTotals; // drawRoutes() 実行後に buildCums() で設定済みの累積総量
+
+    // 2) アルゴリズム分岐
+    if (algo === 'greedy'){
+  // 等間隔ターゲットに近い「上位K候補」を各トリガーから集める
+  const K = 3; // ここを2～5で調整可
+  const candGroups = greedyTopKCandidates(restGroups, cumTotals, K);
+
+  // 直積（上限をかけて暴走防止）
+  const combos = enumerateCombinations(candGroups, /*perGroupLimit=*/K, /*hardCap=*/60);
+  if (!combos.length){
+    alert('組み合わせ候補が作れませんでした（候補不足）。');
+    return;
+  }
+
+  // 全候補を「累積差分の近似評価」で採点（ゼロAPI）
+  const scored = combos.map(cmb => {
+    const picksByTrigger = cmb; // null含む（未採用も許容）
+    const ev = evalByCums(restGroups, picksByTrigger, cumTotals); // dist/time/energy のσ合計でスコア
+    return {
+      score: ev.score,
+      stats: ev.stats,
+      picksByTrigger,
+      picks: picksByTrigger.filter(Boolean) // 表示用に null 除去
+    };
+  });
+
+  // スコア昇順で上位3件を表示
+  scored.sort((a,b)=>a.score-b.score);
+  showTop3Combos(scored.slice(0,3));
+  return;
+}
+
+
+if (algo === 'beam3'){
+  // --- ビームサーチ（幅3・ゼロAPI） ---
+  // 「候補があるトリガー数」は必ず採用する
+  const triggersWithCand = (restGroups || []).reduce((n, g) => {
+    const valid = (g?.pois || []).filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+    return n + (valid.length ? 1 : 0);
+    }, 0);
+  const top = beamSearch(restGroups, cumTotals, /*width*/3, /*minRest*/triggersWithCand, /*nullPenalty*/1e6, /*forbidNullWhenCand*/true);
+  top.forEach(t => t.picks = t.picksByTrigger.filter(Boolean));
+  showTop3Combos(top);
+  return;
+}
+
+
+    if (algo === 'bruteforce'){
+      // --- 総当たり（API多め・高精度）---
+      // ※CORS/429に注意。可能ならプロキシ＋バックオフ/キャッシュを導入してください。
+      const perGroupLimit = Math.max(1, Math.min(3, Number($('poiLimit').value)||3)); // 各トリガー最大件数
+      const combos = enumerateCombinations(poiGroups, perGroupLimit, 60);             // 総当たり上限60通り
+      if (!combos.length){
+        alert('組み合わせ候補が作れませんでした。');
+        return;
+      }
+
+      const profile = $('profileSelect').value; // ORSプロファイル（cycling-road 等）
+      const results = [];
+
+      // 逐次でAPI負荷を抑えつつ評価
+      for (const cmb of combos){
+        const picks = cmb.filter(Boolean); // null除外
+        const wps = [start, ...picks, goal].map(p=>({
+          lat: p.lat, lon: p.lon, name: p.name || 'POI'
+        }));
+
+        try {
+          // ORS で実際の経路を引いて、既存の calcLegStats でレグ統計を算出
+          const {feature, stats} = await routeLegStatsForWaypoints(wps, profile);
+          const score = comboScore(stats); // 距離/時間/エネの標準偏差の合計
+          results.push({ score, feature, picks, picksByTrigger: cmb, stats });
+        } catch(e){
+          console.warn('combo route fail', e);
+          // 失敗した組合せはスキップ
+        }
+      }
+
+      // スコア昇順に上位3件
+      results.sort((a,b)=>a.score-b.score);
+      showTop3Combos(results.slice(0,3));
+      return;
+    }
+
+    // 未知の値（保険）
+    alert('未知のアルゴリズム指定です。');
+  } catch (err){
+    console.error(err);
+    alert('ルート探索でエラー: ' + (err.message || err));
+  }
+};
 
   new Sortable($('pointList'),{
     animation:150,
@@ -295,8 +460,7 @@ async function drawRoutes(){
   if(markerLayer) map.removeLayer(markerLayer);
 
   markerLayer=L.layerGroup().addTo(map);
-  const ICON = c=>new L.Icon({iconUrl:`https://maps.gstatic.com/mapfiles/ms2/micons/${c}-dot.png`,iconSize:[32,32],iconAnchor:[16,32]});
-  const ICONS = {start:ICON('green'),via:ICON('blue'),goal:ICON('red')};
+  
   pts.forEach(p=>markerLayer.addLayer(L.marker([p.lat,p.lon],{icon:ICONS[p.type||'via']}).bindTooltip(p.name)));
 
   const coords=pts.map(p=>[p.lon,p.lat]);
@@ -339,6 +503,7 @@ async function drawRoutes(){
     const mass = 75; // 体重+バイク質量(例)
     const flat = 18; // 平坦係数
     const rests = await makeRestPoints(routeData.fastest, mass, flat);
+    restGroups = (rests || []).map(r => ({ rest: r, pois: [] }));
 
     restList = []; // 前回のリストをリセット
 
@@ -365,27 +530,40 @@ async function drawRoutes(){
       }
 
       // POI検索（半径固定・近い順に n 件）
-      if ($('poiToggle').checked) {
-        const baseRadius = Number($('poiRadius').value) || 50000;
-        const limit = Math.max(1, Number($('poiLimit').value) || 5);
-        for (const r of rests) {
-          try {
-            const pois = await fetchPoisAround(r.lat, r.lon, baseRadius, limit);
-            logRest(`[POI] ${(r.routeD / 1000).toFixed(2)} km: 半径${baseRadius}m → ${pois.length}件（近い順）`);
-            pois.forEach(po => {
-              L.marker([po.lat, po.lon], {
-                icon: new L.Icon({
-                  iconUrl: 'https://maps.gstatic.com/mapfiles/ms2/micons/purple.png',
-                  iconSize: [24, 24],
-                  iconAnchor: [12, 24]
-                })
-              }).bindTooltip(po.name).addTo(markerLayer);
-            });
-          } catch (e) {
-            logRest(`[POI] ${(r.routeD / 1000).toFixed(2)} km: 取得失敗`);
-          }
-        }
-      }
+if ($('poiToggle').checked) {
+  const baseRadius = Number($('poiRadius').value) || 50000;
+  const limit = Math.max(1, Number($('poiLimit').value) || 5);
+
+  for (let idx = 0; idx < rests.length; idx++) {
+    const r = rests[idx];
+    try {
+      const pois = await fetchPoisAround(r.lat, r.lon, baseRadius, limit);
+      logRest(`[POI] ${(r.routeD / 1000).toFixed(2)} km: 半径${baseRadius}m → ${pois.length}件（近い順）`);
+
+      // ▼ 追加：この休憩トリガーのPOIを保存
+      if (restGroups[idx]) restGroups[idx].pois = pois;
+
+      // 既存：マップに描画
+      pois.forEach(po => {
+        L.marker([po.lat, po.lon], {
+          icon: new L.Icon({
+            iconUrl: 'https://maps.gstatic.com/mapfiles/ms2/micons/purple.png',
+            iconSize: [24, 24],
+            iconAnchor: [12, 24]
+          })
+        }).bindTooltip(po.name).addTo(markerLayer);
+      });
+    } catch (e) {
+      logRest(`[POI] ${(r.routeD / 1000).toFixed(2)} km: 取得失敗`);
+    }
+  }
+
+  // ▼ 追加：パネルへ反映
+  updateRestPoiPanel();
+  ensureProjections();
+  
+}
+
     }
 
     // デフォルト表示は最速
@@ -456,54 +634,96 @@ async function makeRestPoints(feature,mass,flat){
     }
   }
 
-  // 統計トリガ
-  if($('optStatTrigger').checked){
-    const mean=Number($('statMean').value), vari=Number($('statVar').value);
-    const rng=()=>Math.random();
-    const normal=()=>Math.sqrt(-2*Math.log(rng()))*Math.cos(2*Math.PI*rng());
-    let target=mean + Math.sqrt(vari)*normal();
-    let acc=0;
-    for(const s of segs){
-      for(const st of s.steps||[]){
-        const [i0,i1]=st.way_points||[0,0];
-        const d=st.distance||0;
-        acc += d/1000;
-        if(acc >= target){
-          raw.push({lat:coords[i1][1],lon:coords[i1][0],routeD:cumDist[i1]});
+  // 統計トリガ（安全化パッチ）
+  if ($('optStatTrigger').checked) {
+    const meanRaw = Number($('statMean').value);
+    const varRaw  = Number($('statVar').value);
+
+    const mean  = Number.isFinite(meanRaw) ? meanRaw : 0;
+    const sigma = (Number.isFinite(varRaw) && varRaw >= 0) ? Math.sqrt(varRaw) : 0;
+
+    // Box-Muller：0 の log 回避
+    const normal = () => {
+      let u = Math.random(); if (u <= 1e-12) u = 1e-12;
+      let v = Math.random();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    };
+
+    // 休憩間隔の下限（km）。必要なら 0.3～1.0 で好み調整
+    const MIN_KM = 0.5;
+
+    let target = Math.max(MIN_KM, mean + sigma * normal());
+    let accKm  = 0;
+
+    for (const s of segs) {
+      for (const st of s.steps || []) {
+        const [i0, i1] = st.way_points || [0, 0];
+        const d = st.distance || 0;        // m
+        accKm += d / 1000;
+
+        if (accKm >= target) {
+          raw.push({ lat: coords[i1][1], lon: coords[i1][0], routeD: cumDist[i1] });
           logRest(`[STAT] ${(cumDist[i1]/1000).toFixed(2)} km → HIT`);
-          target = mean + Math.sqrt(vari)*normal();
-          acc=0;
+
+          // 次ターゲットも下限を確保
+          target = Math.max(MIN_KM, mean + sigma * normal());
+          accKm = 0;
         }
       }
     }
   }
 
-  // 割合トリガ
-  if($('optPercentTrigger').checked){
-    const stepPct=Number($('percentStep').value)/100;
-    const metric=$('percentMetric').value;
-    const totalDist = feature.properties.summary.distance;
-    const totalTime = feature.properties.summary.duration;
-    const totalEnergy = await totalEnergyKJ(feature,mass,flat);
-    let passed=0;
-    for(const s of segs){
-      for(const st of s.steps||[]){
-        const [i0,i1]=st.way_points||[0,0];
-        const d=st.distance||0,t=st.duration||0;
-        const dz = hasEle ? ((coords[i1][2]||0)-(coords[i0][2]||0)) : 0;
-        const dE = energyStepKJ(d,dz,mass,flat);
-        if(metric==='distance') passed+=d;
-        else if(metric==='time') passed+=t;
-        else passed+=dE;
-        const total = metric==='distance'? totalDist : metric==='time'? totalTime : totalEnergy;
-        while(passed >= stepPct*total){
-          raw.push({lat:coords[i1][1],lon:coords[i1][0],routeD:cumDist[i1]});
-          logRest(`[PERCENT] ${(cumDist[i1]/1000).toFixed(2)} km → HIT`);
-          passed = 0;
+
+   // 割合トリガ（安全化パッチ）
+  if ($('optPercentTrigger').checked) {
+    // 入力値の正規化（1%～90%に丸め：好みで調整可）
+    let stepPct = Number($('percentStep').value) / 100;
+    if (!Number.isFinite(stepPct)) stepPct = 0.25;
+    stepPct = Math.min(0.9, Math.max(0.01, stepPct));
+
+    const metric = $('percentMetric').value;
+
+    const totalDist   = feature.properties.summary.distance;     // m
+    const totalTime   = feature.properties.summary.duration;     // s
+    const totalEnergy = await totalEnergyKJ(feature, mass, flat); // kJ
+
+    const total = (metric === 'distance') ? totalDist
+                : (metric === 'time')     ? totalTime
+                :                           totalEnergy;
+
+    if (!(Number.isFinite(total) && total > 0)) {
+      logRest('[PERCENT] 総量が0または非数のためスキップ');
+    } else {
+      // 閾値は「累積ターゲット」を順に足していく方式
+      let nextThreshold = stepPct * total;
+      let progressed    = 0;
+      const hasEle = coords[0].length >= 3;
+
+      for (const s of segs) {
+        for (const st of s.steps || []) {
+          const [i0, i1] = st.way_points || [0, 0];
+          const d  = st.distance || 0;  // m
+          const t  = st.duration || 0;  // s
+          const dz = hasEle ? ((coords[i1][2] || 0) - (coords[i0][2] || 0)) : 0;
+          const dE = energyStepKJ(d, dz, mass, flat);
+
+          if (metric === 'distance') progressed += d;
+          else if (metric === 'time') progressed += t;
+          else progressed += dE;
+
+          // 1ステップで複数回閾値を跨ぐ可能性があるので while で対応
+          while (progressed >= nextThreshold) {
+            raw.push({ lat: coords[i1][1], lon: coords[i1][0], routeD: cumDist[i1] });
+            logRest(`[PERCENT] ${(cumDist[i1]/1000).toFixed(2)} km → HIT`);
+            nextThreshold += stepPct * total;
+          }
         }
       }
     }
   }
+
+  
+
   return raw;
 }
 
@@ -546,7 +766,7 @@ async function showRouteLegSummary(){
     const es = summaryStats(s.energy);
     const label = key==='shortest'?'最短':key==='fastest'?'最速':'勾配';
     const html = `
-      <details open style="margin-bottom:8px">
+      < style="margin-bottom:8px">
         <summary><b>${label}</b> 区間統計（平均 / 分散 / 標準偏差）</summary>
         距離: ${ds.mean.toFixed(2)} km / ${ds.var.toFixed(2)} km² / σ=${ds.std.toFixed(2)} km<br>
         時間: ${ts.mean.toFixed(2)} 分 / ${ts.var.toFixed(2)} 分² / σ=${ts.std.toFixed(2)} 分<br>
@@ -676,111 +896,161 @@ async function overpassRetry(query) {
   return await overpassQuery(query);
 }
 
-/* ===== POI取得：半径固定・近い順に n 件 ===== */
+/* ===== POI取得（改良版）：カテゴリ自動拡張＋半径段階拡大＋距離ソート ===== */
 async function fetchPoisAround(latRaw, lonRaw, baseRadius, limit) {
+  // --- 入力/前処理 ---
+  const round6 = v => Math.round(Number(v) * 1e6) / 1e6;
+  const lat = round6(latRaw), lon = round6(lonRaw);
+  const centerLL = L.latLng(lat, lon);
+
+  const limitN = Math.max(1, Number(limit) || 5);
+
+  // ユーザの3チェックを読む（コンビニ/スーパー/ドラッグ）
   const useConvenience = document.getElementById('chkConvenience')?.checked ?? true;
   const useSuper       = document.getElementById('chkSuper')?.checked ?? true;
   const useDrug        = document.getElementById('chkDrug')?.checked ?? true;
-  if (!useConvenience && !useSuper && !useDrug) return [];
 
-  const round6 = v => Math.round(Number(v) * 1e6) / 1e6;
-  const lat = round6(latRaw), lon = round6(lonRaw);
-  const radius = Math.max(30, Number(baseRadius) || 50000);
-  const centerLL = L.latLng(lat, lon);
+  // まずはユーザ指定カテゴリのみで試す。0件なら休憩に適したカテゴリを自動で追加して再試行
+  const PRIMARY_TAGS = [];
+  if (useConvenience) PRIMARY_TAGS.push(['shop', 'convenience']);
+  if (useSuper)       PRIMARY_TAGS.push(['shop', 'supermarket']);
+  if (useDrug) {
+    PRIMARY_TAGS.push(['shop','chemist'], ['shop','pharmacy'], ['amenity','pharmacy']);
+  }
 
-  // 統合クエリ（node/way を明示）
-  const unifiedQuery = (() => {
+  // 追加カテゴリ（候補ゼロ時に順次追加）
+  const EXTRA_TAGS = [
+    ['amenity','cafe'],
+    ['amenity','restaurant'],
+    ['amenity','fast_food'],
+    ['amenity','drinking_water'],
+    ['amenity','toilets'],
+    ['amenity','shelter'],
+    ['amenity','bench'],
+    ['amenity','bicycle_repair_station'],
+    ['tourism','picnic_site'],
+    ['highway','rest_area'],
+    // 自販機（飲料）: vending_machine=drinks or amenity=vending_machine + vending=drinks
+    ['amenity','vending_machine'],
+  ];
+
+  // 段階的に広げる半径（m）。baseRadiusを優先して組み込む
+  const radiusSteps = (() => {
+    const base = Math.max(100, Number(baseRadius) || 5000); // 初期は小さめから
+    const steps = [1000, 2000, 3000, 5000, 8000, 12000, 20000, 30000, 50000, 80000, 100000];
+    // base を先頭へ（重複排除）
+    const s = [base, ...steps].filter((v, i, a) => a.indexOf(v) === i).sort((a,b)=>a-b);
+    return s;
+  })();
+
+  // Overpassクエリを作る（node/way両方、out center）
+  const buildQuery = (tags, radius) => {
+    if (!tags.length) return null;
+    // 同一キーの複数値（例: shop=chemist / shop=pharmacy）も繋げて検索
     const clauses = [];
-    const shopVals = [];
-    if (useConvenience) shopVals.push('convenience');
-    if (useSuper)       shopVals.push('supermarket');
-    if (useDrug)        shopVals.push('chemist','pharmacy');
-    if (shopVals.length) {
-      const re = '(' + shopVals.join('|') + ')';
-      clauses.push(`node(around:${radius},${lat},${lon})["shop"~"${re}"]`);
-      clauses.push(`way(around:${radius},${lat},${lon})["shop"~"${re}"]`);
+    // tags は [ [k,v], [k,v], ... ]
+    // ここで key ごとに v をまとめた正規表現にする
+    const grouped = {};
+    for (const [k, v] of tags) {
+      grouped[k] = grouped[k] || new Set();
+      grouped[k].add(v);
     }
-    if (useDrug) {
-      clauses.push(`node(around:${radius},${lat},${lon})["amenity"="pharmacy"]`);
-      clauses.push(`way(around:${radius},${lat},${lon})["amenity"="pharmacy"]`);
-    }
-    if (!clauses.length) return null;
+    Object.entries(grouped).forEach(([k, set]) => {
+      const values = Array.from(set);
+      // vending_machine は補助属性 vending=drinks にも対応
+      if (k === 'amenity' && values.includes('vending_machine')) {
+        clauses.push(`node(around:${radius},${lat},${lon})["amenity"="vending_machine"]`);
+        clauses.push(`way(around:${radius},${lat},${lon})["amenity"="vending_machine"]`);
+        clauses.push(`node(around:${radius},${lat},${lon})["vending"~"(drinks|beverages)"]`);
+        clauses.push(`way(around:${radius},${lat},${lon})["vending"~"(drinks|beverages)"]`);
+      }
+      const re = '(' + values.map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')';
+      clauses.push(`node(around:${radius},${lat},${lon})["${k}"~"${re}"]`);
+      clauses.push(`way(around:${radius},${lat},${lon})["${k}"~"${re}"]`);
+    });
+
     return `[out:json][timeout:25];
 (
   ${clauses.join(';\n  ')};
 );
 out center;`;
-  })();
-
-  // 400時の分割クエリ
-  const splitSpecs = [];
-  if (useConvenience) splitSpecs.push(['shop','convenience']);
-  if (useSuper)       splitSpecs.push(['shop','supermarket']);
-  if (useDrug) {
-    splitSpecs.push(['shop','chemist'], ['shop','pharmacy'], ['amenity','pharmacy']);
-  }
-  const runSplitQueries = async () => {
-    const acc = [];
-    for (const [k,v] of splitSpecs) {
-      const q = `[out:json][timeout:25];
-(
-  node(around:${radius},${lat},${lon})["${k}"="${v}"];
-  way(around:${radius},${lat},${lon})["${k}"="${v}"];
-);
-out center;`;
-      try {
-        const data = await overpassRetry(q);
-        (data.elements || []).forEach(e => acc.push(e));
-        await new Promise(r=>setTimeout(r,150));
-      } catch (err) {
-        console.warn('[Overpass split] fail', k, v, err);
-      }
-    }
-    return acc;
   };
 
-  let elements = [];
-  if (unifiedQuery) {
+  // 実行→elements→結果整形
+  const runOnce = async (tags, radius) => {
+    let elements = [];
+    const q = buildQuery(tags, radius);
+    if (!q) return [];
+
     try {
-      const data = await overpassRetry(unifiedQuery);
+      const data = await overpassRetry(q);
       elements = data.elements || [];
     } catch (err) {
-      if (String(err).includes('status=400')) {
-        elements = await runSplitQueries();
-      } else {
-        throw err;
+      // 400は構文系 → ログして空扱い。他エラーは上位へ投げてもOKだが、ここでは空で継続。
+      if (String(err).includes('status=400')) console.warn('[Overpass] 400 with query, continue fallback.');
+      else console.warn('[Overpass] error', err);
+      elements = [];
+    }
+
+    // elements を {name, lat, lon, dist} に整形
+    const results = [];
+    elements.forEach(e => {
+      const ll = e.type === 'node'
+        ? [e.lat, e.lon]
+        : (e.center ? [e.center.lat, e.center.lon] : null);
+      if (!ll) return;
+      const name = (e.tags && (e.tags['name:ja'] || e.tags.name || e.tags.brand)) || 'POI';
+      const dist = centerLL.distanceTo([ll[0], ll[1]]); // m
+      results.push({ name, lat: ll[0], lon: ll[1], dist });
+    });
+
+    // 重複排除（同名＆近接点が多い場合もあるので座標キーで粗く）
+    const seen = new Set();
+    const uniq = [];
+    for (const p of results) {
+      const key = `${p.name}|${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniq.push(p);
+    }
+
+    // 距離でソート
+    uniq.sort((a,b)=>a.dist-b.dist);
+    return uniq;
+  };
+
+  // 1) まず「ユーザ指定カテゴリのみ」で半径ステップを回す
+  let picked = [];
+  for (const r of radiusSteps) {
+    const res = await runOnce(PRIMARY_TAGS, r);
+    if (res.length >= limitN) {
+      picked = res.slice(0, limitN);
+      break;
+    }
+    // 足りない分は仮に確保（次ステップで埋まれば上書きされる）
+    if (res.length && !picked.length) picked = res.slice(0, limitN);
+  }
+
+  // 2) それでも不足するなら、カテゴリを自動拡張して再試行
+  if (picked.length < limitN) {
+    const MERGED = PRIMARY_TAGS.slice();
+    EXTRA_TAGS.forEach(t => MERGED.push(t));
+
+    for (const r of radiusSteps) {
+      const res = await runOnce(MERGED, r);
+      if (res.length >= limitN) {
+        picked = res.slice(0, limitN);
+        break;
+      }
+      if (res.length && res.length > picked.length) {
+        picked = res.slice(0, limitN);
       }
     }
   }
 
-  // elements → results（距離を付与）
-  const resultsRaw = [];
-  elements.forEach(e => {
-    const ll = e.type === 'node'
-      ? [e.lat, e.lon]
-      : (e.center ? [e.center.lat, e.center.lon] : null);
-    if (!ll) return;
-    const name = (e.tags && (e.tags['name:ja'] || e.tags.name || e.tags.brand)) || 'POI';
-    const dist = centerLL.distanceTo([ll[0], ll[1]]); // m
-    resultsRaw.push({ name, lat: ll[0], lon: ll[1], dist });
-  });
-
-  // 近い順にソート → 上位 n 件
-  resultsRaw.sort((a,b)=>a.dist-b.dist);
-  const limitN = Math.max(1, Number(limit) || 5);
-  const topN = resultsRaw.slice(0, limitN);
-
-  // 同名・同座標重複の軽い除去
-  const seen = new Set();
-  const results = [];
-  for (const p of topN) {
-    const key = `${p.name}|${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    results.push(p);
-  }
-  return results;
+  return picked;
 }
+
 
 /* ===== 小ユーティリティ ===== */
 function sanitizeCoord(n, fallback) {
@@ -806,8 +1076,620 @@ function updateRestListPanel(){
   });
 }
 
+function updateRestPoiPanel(){
+  const ol = document.getElementById('restPoiPanel');
+  if (!ol) return;
+  ol.innerHTML = '';
+
+  if (!restGroups.length){
+    const li = document.createElement('li');
+    li.textContent = '休憩トリガーはありません';
+    ol.appendChild(li);
+    return;
+  }
+
+  restGroups.forEach((g, i) => {
+    const li = document.createElement('li');
+    li.style.margin = '6px 0';
+
+    // 見出し：休憩トリガー#N（km地点 / 緯度経度）
+    const km = (g.rest?.routeD ?? 0) / 1000;
+    const head = document.createElement('div');
+    head.innerHTML = `<b>休憩トリガー＃${i+1}</b>　<span style="color:#666">${km.toFixed(2)} km地点</span>
+      <small>(${(g.rest?.lat ?? 0).toFixed(5)}, ${(g.rest?.lon ?? 0).toFixed(5)})</small>`;
+    li.appendChild(head);
+
+    // 候補POIのUL
+    const ul = document.createElement('ul');
+    ul.style.listStyle = 'none';
+    ul.style.margin = '4px 0 0';
+    ul.style.padding = '0';
+
+    if (!g.pois?.length){
+      const x = document.createElement('li');
+      x.textContent = '・（候補なし）';
+      ul.appendChild(x);
+    } else {
+      g.pois.forEach((p) => {
+        const it = document.createElement('li');
+        it.style.padding = '2px 0';
+        it.textContent = `・${p.name}　${p.lat.toFixed(5)}　${p.lon.toFixed(5)}`;
+        ul.appendChild(it);
+      });
+    }
+
+    li.appendChild(ul);
+    ol.appendChild(li);
+  });
+}
+
+// 組み合わせ表示専用：使用地点だけピンを出す
+function setComboMarkers(start, picksArray, goal){
+  // 既存ピンをすべて消す
+  if (markerLayer) map.removeLayer(markerLayer);
+  markerLayer = L.layerGroup().addTo(map);
+
+  // スタート
+  if (start) {
+    L.marker([start.lat, start.lon], {icon:ICONS.start})
+      .bindTooltip(start.name || 'スタート').addTo(markerLayer);
+  }
+
+  // 採用POI（順路）
+  (picksArray || []).forEach((p, i) => {
+    if (!p) return;
+    L.marker([p.lat, p.lon], {
+      icon: new L.Icon({
+        iconUrl: 'https://maps.gstatic.com/mapfiles/ms2/micons/purple-dot.png',
+        iconSize:[32,32], iconAnchor:[16,32]
+      })
+    }).bindTooltip(`${p.name || '休憩'} #${i+1}`).addTo(markerLayer);
+  });
+
+  // ゴール
+  if (goal) {
+    L.marker([goal.lat, goal.lon], {icon:ICONS.goal})
+      .bindTooltip(goal.name || 'ゴール').addTo(markerLayer);
+  }
+}
+
+
+function showTop3Combos(resultList){
+  const box = document.getElementById('comboTop3');
+  box.innerHTML = '';
+  if (!resultList.length){
+    box.textContent = '候補がありません（休憩トリガーやPOIが不足）';
+    return;
+  }
+
+  const sd = (a)=>{ if(!a.length) return 0;
+    const m=a.reduce((x,y)=>x+y,0)/a.length;
+    return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length);
+  };
+  const fmt = (n)=>Number(n).toFixed(5);
+
+  resultList.slice(0,3).forEach((r, idx) => {
+    const rank = idx+1;
+
+    const wrap = document.createElement('div');
+    wrap.style.border='1px solid #ddd';
+    wrap.style.borderRadius='8px';
+    wrap.style.padding='8px';
+    wrap.style.marginBottom='8px';
+
+    const header = document.createElement('div');
+    header.innerHTML = `
+      <div style="font-weight:700;margin-bottom:4px">
+        #${rank}　スコア（σ合計）: ${(sd(r.stats.dist)+sd(r.stats.time)+sd(r.stats.energy)).toFixed(3)}
+      </div>
+      <div style="margin-top:4px">
+        距離σ=${sd(r.stats.dist).toFixed(2)} km　
+        時間σ=${sd(r.stats.time).toFixed(2)} 分　
+        エネルギーσ=${sd(r.stats.energy).toFixed(2)} kJ
+      </div>
+    `;
+    wrap.appendChild(header);
+
+    const list = document.createElement('div');
+    list.style.marginTop = '8px';
+    list.innerHTML = `<div style="font-weight:600;margin-bottom:4px">採用した休憩地点（トリガーごと）</div>`;
+    const ol = document.createElement('ol');
+    ol.style.margin = '4px 0 0 1.1rem';
+    ol.style.fontSize = '0.92rem';
+
+    (restGroups || []).forEach((g, i) => {
+      const li = document.createElement('li');
+      const km = ((g?.rest?.routeD || 0) / 1000).toFixed(2);
+      const head = document.createElement('div');
+      head.innerHTML = `<b>休憩トリガー＃${i+1}</b>　<span style="color:#666">${km} km地点</span>
+        <small>(${fmt(g?.rest?.lat||0)}, ${fmt(g?.rest?.lon||0)})</small>`;
+      li.appendChild(head);
+
+      const chosen = (r.picksByTrigger && r.picksByTrigger[i]) ? r.picksByTrigger[i] : null;
+      const ul = document.createElement('ul');
+      ul.style.listStyle='none'; ul.style.margin='4px 0 0'; ul.style.padding='0';
+
+      const row = document.createElement('li');
+      row.style.padding='2px 0';
+
+      if (chosen){
+        row.style.cursor='pointer';
+        row.textContent = `・${chosen.name}　${fmt(chosen.lat)}　${fmt(chosen.lon)}`;
+        row.onclick = () => {
+          map.flyTo([chosen.lat, chosen.lon], 17);
+          L.popup().setLatLng([chosen.lat, chosen.lon]).setContent(chosen.name).openOn(map);
+        };
+      }else{
+  // 補修後にここへ来るのは「本当に候補ゼロのトリガー」だけ
+  row.textContent = '・（候補なし）';
+  row.style.color = '#777';
+}
+
+      ul.appendChild(row);
+      li.appendChild(ul);
+      ol.appendChild(li);
+    });
+
+    list.appendChild(ol);
+    wrap.appendChild(list);
+
+    const btnWrap = document.createElement('div');
+    btnWrap.style.marginTop='8px';
+    const btn = document.createElement('button');
+    btn.textContent = 'このルートを表示';
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = 'ルート生成中...';
+      try {
+        let feature = r.feature;
+        if (!feature) {
+          const start = pts.find(p=>p.type==='start') || pts[0];
+          const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+          if (!start || !goal) { alert('スタート/ゴールが見つかりません。'); return; }
+          const picksArray = (r.picksByTrigger && Array.isArray(r.picksByTrigger))
+            ? r.picksByTrigger.filter(Boolean)
+            : (r.picks || []);
+          const wps = [start, ...picksArray, goal].map(p=>({lat:p.lat, lon:p.lon, name:p.name || 'POI'}));
+          const profile = $('profileSelect').value;
+          const out = await routeLegStatsForWaypoints(wps, profile);
+          feature = out.feature;
+        }
+        if (!feature) { alert('ルートを生成できませんでした。'); return; }
+
+        clearRouteLayers();
+        const color = '#00aa88';
+        const layer = L.geoJSON(feature, { style:{ color, weight: 7 } }).addTo(map);
+        routeLayers['combo#'+rank] = layer;
+
+        const start = pts.find(p=>p.type==='start') || pts[0];
+        const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+        const picksArray = (r.picksByTrigger && Array.isArray(r.picksByTrigger))
+          ? r.picksByTrigger.filter(Boolean)
+          : (r.picks || []);
+        setComboMarkers(start, picksArray, goal);
+
+        if (layer.getBounds && layer.getBounds().isValid && layer.getBounds().isValid()) {
+          map.fitBounds(layer.getBounds().pad(0.1));
+        } else {
+          const fallback = (r.picks && r.picks[0]) || pts[0];
+          if (fallback) map.flyTo([fallback.lat, fallback.lon], 14);
+        }
+        setActiveButton(null);
+      } catch (e){
+  console.error(e);
+  const hints = [
+    !ORS_KEY ? 'ORS_KEY が未設定' : null,
+    !(pts && pts.length>=2) ? 'Start/Goal が不正' : null,
+    !routeData.fastest ? '最速ルート未生成（先に「休憩場所検索」を実行）' : null
+  ].filter(Boolean).join(' / ');
+  alert('ルート描画でエラー: ' + (e.message || e) + (hints ? '\nヒント: ' + hints : ''));
+} finally {
+        btn.disabled = false;
+        btn.textContent = 'このルートを表示';
+      }
+    };
+    btnWrap.appendChild(btn);
+    wrap.appendChild(btnWrap);
+
+    box.appendChild(wrap);
+  });
+}
+
+
+
+/* ===== 組み合わせルート探索＆評価ユーティリティ ===== */
+
+// 休憩トリガーごとに1地点ずつ選ぶ全組み合わせを列挙（上限あり）
+function enumerateCombinations(poiGroups, perGroupLimit = 3, hardCap = 60){
+  const groups = poiGroups.map(arr => (arr || []).slice(0, perGroupLimit));
+  const combos = [];
+  function dfs(i, acc){
+    if (combos.length >= hardCap) return;
+    if (i === groups.length){ combos.push(acc.slice()); return; }
+    const g = groups[i];
+    if (!g.length){ acc.push(null); dfs(i+1, acc); acc.pop(); return; }
+    for (const p of g){ if (combos.length >= hardCap) break; acc.push(p); dfs(i+1, acc); acc.pop(); }
+  }
+  dfs(0, []);
+  return combos;
+}
+
+// スコア（小さいほど良い）：距離/時間/エネルギーの標準偏差の合計
+function comboScore(legStats){
+  const sd = (a)=>{ if(!a.length) return 0; const m=a.reduce((x,y)=>x+y,0)/a.length; 
+    return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length); };
+  return sd(legStats.dist)+sd(legStats.time)+sd(legStats.energy);
+}
+
+// 組み合わせルートのレグ統計を取得（ORS呼び出し）
+async function routeLegStatsForWaypoints(wps, profile){
+  const body = { coordinates: wps.map(p=>[p.lon,p.lat]), elevation:true, extra_info:['steepness'], preference:'fastest' };
+  const feature = (await dir(body, profile)).features[0];
+  const mass=75, flat=18;
+  const stats = await calcLegStats(feature, mass, flat);
+  return { feature, stats };
+}
+
+// ルートの累積距離[m]/時間[s]/エネルギー[kJ]を構築
+function buildCums(feature, mass=75, flat=18){
+  const coords = feature.geometry.coordinates;
+  const hasEle = coords[0].length>=3;
+  const segs   = feature.properties.segments||[];
+  const cum = { D:[0], T:[0], E:[0] };
+  for(const s of segs){
+    for(const st of (s.steps||[])){
+      const [i0,i1]=st.way_points||[0,0];
+      const d=st.distance||0, t=st.duration||0;
+      const dz = hasEle ? ((coords[i1][2]||0)-(coords[i0][2]||0)) : 0;
+      const dE = energyStepKJ(d,dz,mass,flat);
+      cum.D.push(cum.D.at(-1)+d);
+      cum.T.push(cum.T.at(-1)+t);
+      cum.E.push(cum.E.at(-1)+dE);
+    }
+  }
+  return {cum, coords};
+}
+
+// POIをルート折れ線へ射影し、その地点の累積値を内挿で取得
+function projectToRoute(lat,lon, coords, cum){
+  let best={i0:0,i1:1,frac:0,dist:Infinity, stepIdx:1};
+  let stepIdx=1;
+  for(let i=1;i<coords.length;i++, stepIdx++){
+    const A=L.latLng(coords[i-1][1],coords[i-1][0]);
+    const B=L.latLng(coords[i][1],  coords[i][0]);
+    const P=L.latLng(lat,lon);
+    const AB=[B.lat-A.lat, B.lng-A.lng];
+    const AP=[P.lat-A.lat, P.lng-A.lng];
+    const ab2=AB[0]*AB[0]+AB[1]*AB[1]||1e-12;
+    let t=(AP[0]*AB[0]+AP[1]*AB[1])/ab2; t=Math.max(0,Math.min(1,t));
+    const Q=L.latLng(A.lat+AB[0]*t, A.lng+AB[1]*t);
+    const d=P.distanceTo(Q);
+    if(d<best.dist){ best={i0:i-1,i1:i,frac:t,dist:d, stepIdx:i}; }
+  }
+  const i = best.stepIdx;
+  const lerp=(arr)=>{ const v0=arr[i-1], v1=arr[i]??v0; return v0 + (v1-v0)*best.frac; };
+  return { cumD:lerp(cum.D), cumT:lerp(cum.T), cumE:lerp(cum.E) };
+}
+
+// picksByTrigger（各トリガーの選択）を累積から評価（ゼロAPI）
+function evalByCums(restGroups, picksByTrigger, cumTotals){
+  // 1) トータルのサニタイズ
+  const totalD = Number(cumTotals?.D) || 0;   // m
+  const totalT = Number(cumTotals?.T) || 0;   // s
+  const totalE = Number(cumTotals?.E) || 0;   // kJ
+
+  // 2) 区切り（cuts）作成：start(0) → 各pickの累積距離 → goal(totalD)
+  const cuts = [0];
+  (picksByTrigger || []).forEach(p => {
+    const v = Number(p?._proj?.cumD);
+    if (Number.isFinite(v) && v > 0 && v < totalD) cuts.push(v);
+  });
+  if (totalD > 0) cuts.push(totalD);
+
+  // 3) 区間距離配列（km）
+  const dist = [];
+  if (cuts.length >= 2){
+    cuts.sort((a,b)=>a-b);
+    for (let i=1;i<cuts.length;i++){
+      const d = (Number(cuts[i]) - Number(cuts[i-1])) / 1000; // km
+      if (Number.isFinite(d) && d >= 0) dist.push(d);
+    }
+  }
+
+  // 4) 区間時間/エネルギーを距離比で近似配分（分母0なら均等割り）
+  const time = [], energy = [];
+  if (dist.length){
+    if (totalD > 0 && Number.isFinite(totalD)){
+      for (const d of dist){
+        const ratio = ((d*1000) / totalD); // 0..1
+        time.push((totalT/60) * (Number.isFinite(ratio)? ratio : 0)); // 分
+        energy.push(totalE * (Number.isFinite(ratio)? ratio : 0));    // kJ
+      }
+    } else {
+      // 総距離が0/未定義でも NaN にしない：均等割りにする
+      const eqT = (totalT/60) / dist.length; // 分
+      const eqE = (totalE) / dist.length;    // kJ
+      for (let i=0;i<dist.length;i++){ time.push(eqT||0); energy.push(eqE||0); }
+    }
+  }
+
+  // 5) NaN/∞ を弾く安全化
+  const finite = a => a.filter(x => Number.isFinite(x));
+  const distF = finite(dist), timeF = finite(time), energyF = finite(energy);
+
+  // 6) σ計算（空配列でも落ちない）
+  const sd = (a) => {
+    if (!a.length) return 0;
+    const m = a.reduce((s,v)=>s+v,0) / a.length;
+    const v = a.reduce((s,v)=>s+(v-m)*(v-m),0) / a.length;
+    return Math.sqrt(v);
+  };
+
+  const score = sd(distF) + sd(timeF) + sd(energyF);
+  return { stats: { dist: distF, time: timeF, energy: energyF }, score: Number.isFinite(score)? score : 0 };
+}
+/* ===== 共通ユーティリティ：候補検査＆未採用の強制補修 ===== */
+
+/* ===== 共通ユーティリティ：候補検査＆未採用の強制補修 ===== */
+
+// i番目トリガーに有効候補(_proj.cumDが有限)があるか？
+function hasValidCand(restGroups, i){
+  const g = restGroups[i];
+  if (!g) return false;
+  const valid = (g.pois || []).filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+  return valid.length > 0;
+}
+
+// 未採用(null)を残さないための補修：
+// 候補があるトリガーでは、等間隔ターゲットに最も近い候補で穴埋めする
+function repairNullPicks(restGroups, cumTotals, picks){
+  const R = restGroups.length;
+  const totalD = Number(cumTotals?.D) || 0;
+  if (!R || !Number.isFinite(totalD) || totalD <= 0) return picks;
+
+  const out = picks.slice();
+  for (let i = 0; i < R; i++){
+    if (out[i]) continue;                        // 既に採用済み
+    if (!hasValidCand(restGroups, i)) continue;  // 物理的に候補なしならスキップ
+
+    const g = restGroups[i];
+    const target = totalD * (i + 1) / (R + 1);
+    const valid = (g.pois || []).filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+    if (!valid.length) continue;
+
+    valid.sort((a,b)=>Math.abs(a._proj.cumD - target) - Math.abs(b._proj.cumD - target));
+    out[i] = valid[0];
+  }
+  return out;
+}
+
+
+/* ===== ビームサーチ（ゼロAPI）：候補ありは必採用＋未採用補修 ===== */
+function beamSearch(restGroups, cumTotals, width = 3, minRest = 1, nullPenalty = 1e6, forbidNullWhenCand = true) {
+  // beams 要素: { picks: [...(p or null)], score, pickedCount }
+  let beams = [{ picks: [], score: 0, pickedCount: 0 }];
+
+  for (let i = 0; i < restGroups.length; i++){
+    const g = restGroups[i];
+    const valid = (g?.pois || []).filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+
+    // ★ 候補がある段では null を出さない（未採用分岐を作らない）
+    const cand = valid.length
+      ? (forbidNullWhenCand ? valid : [...valid, null])
+      : [null];
+
+    const next = [];
+    for (const b of beams){
+      for (const p of cand){
+        const picks = b.picks.concat([p]);
+
+        // ゼロAPI近似評価
+        const ev = evalByCums(restGroups, picks, cumTotals);
+        let s = ev.score;
+
+        // ★ 候補があるのに null を選んだ場合は強ペナルティ
+        if (p === null && valid.length){
+          s += nullPenalty;
+        }
+
+        next.push({
+          picks,
+          score: Number.isFinite(s) ? s : 0,
+          pickedCount: b.pickedCount + (p ? 1 : 0)
+        });
+      }
+    }
+
+    // スコア上位 width 件のみ保持
+    next.sort((a,b)=>a.score - b.score);
+    beams = next.slice(0, width);
+  }
+
+  // ★ 最低採用数の制約（候補があるトリガー分を採用）
+  let final = beams.filter(b => b.pickedCount >= minRest);
+  if (!final.length) final = beams;
+
+  // ★ 未採用(null)の“補修”をかけてから最終スコア再計算
+  final = final.map(b => {
+    const fixedPicks = repairNullPicks(restGroups, cumTotals, b.picks);
+    const ev = evalByCums(restGroups, fixedPicks, cumTotals);
+    return {
+      picksByTrigger: fixedPicks,  // ← 修正後の picks を返す（以後の表示は必ず採用表示になる）
+      score: ev.score,
+      stats: ev.stats
+    };
+  }).sort((a,b)=>a.score - b.score);
+
+  return final.slice(0, 3);
+}
+
+
+
+
+/* ===== 等間隔貪欲法（修正版）: 候補がある場合は必ず採用 ===== */
+function greedyTopKCandidates(restGroups, cumTotals, K = 3) {
+  const R = restGroups.length;
+  const groups = [];
+
+  for (let t = 0; t < R; t++) {
+    const g = restGroups[t];
+    const target = cumTotals.D * (t + 1) / (R + 1); // m（距離基準）
+    let pois = (g && Array.isArray(g.pois)) ? g.pois : [];
+
+    if (!pois.length) {
+      groups.push([null]); // 物理的に候補ゼロ
+      continue;
+    }
+
+    // --- 射影値 _proj が無い場合に補完 ---
+    const needProj = pois.some(p => p && (!p._proj || !Number.isFinite(p._proj.cumD)));
+    if (needProj && window.__routeCums) {
+      const { cum, coords } = window.__routeCums;
+      pois.forEach(p => {
+        if (p && (!p._proj || !Number.isFinite(p._proj.cumD))) {
+          p._proj = projectToRoute(p.lat, p.lon, coords, cum);
+        }
+      });
+    }
+
+    // --- 射影値があるものを優先 ---
+    const withProj = pois.filter(p => p && p._proj && Number.isFinite(p._proj.cumD));
+    let ranked;
+
+    if (withProj.length) {
+      ranked = withProj
+        .map(p => ({ p, diff: Math.abs(p._proj.cumD - target) }))
+        .sort((a, b) => a.diff - b.diff)
+        .slice(0, K)
+        .map(x => x.p);
+    } else {
+      // --- フォールバック: 距離(dist)が近い順 ---
+      ranked = pois
+        .map(p => ({ p, d: Number(p.dist) || Infinity }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, K)
+        .map(x => x.p);
+    }
+
+    // 候補があれば必ず採用。空なら [null]
+    groups.push(ranked.length ? ranked : [null]);
+  }
+
+  return groups;
+}
+
+function ensureProjections() {
+  // ルート情報や休憩グループが存在しない場合は何もしない
+  if (!routeData.fastest || !Array.isArray(restGroups) || !restGroups.length) return;
+
+  // ルート上の累積データを構築
+  const { cum, coords } = buildCums(routeData.fastest);
+  window.__routeCums = { cum, coords };
+  window.__cumTotals = {
+    D: cum.D.at(-1),
+    T: cum.T.at(-1),
+    E: cum.E.at(-1)
+  };
+
+  // 各休憩グループの POI に射影データを付ける
+  for (const g of restGroups) {
+    const arr = g?.pois || [];
+    for (const p of arr) {
+      if (!p) continue;
+
+      // 既に _proj があり cumD が有限値ならスキップ
+      if (p._proj && Number.isFinite(p._proj.cumD)) continue;
+
+      // _proj を計算して付与
+      p._proj = projectToRoute(p.lat, p.lon, coords, cum);
+    }
+  }
+
+  console.log("[ensureProjections] 射影を再計算しました");
+}
+
+function dbgShowCumsAndProjections(){
+  const el = $('dbgCums'); if (!el) return;
+  const t = window.__cumTotals;
+  const counts = (restGroups||[]).map((g,i)=>{
+    const valid = (g?.pois||[]).filter(p=>p && p._proj && Number.isFinite(p._proj.cumD)).length;
+    return `#${i+1}: POI=${(g?.pois||[]).length}, projOK=${valid}`;
+  }).join('\n');
+  el.textContent =
+`cumTotals:
+  D=${t?.D?.toFixed?.(1)} m
+  T=${t?.T?.toFixed?.(1)} s
+  E=${t?.E?.toFixed?.(1)} kJ
+per-trigger candidates:
+${counts || '(none)'}`;
+  console.log("[ensureProjections] 射影を再計算しました");
+dbgShowCumsAndProjections();
+}
+
+  
+
+function injectAlgoDebugButtons(cumTotals){
+  // 既に挿入済みならスキップ
+  if (document.getElementById('algoDebugBar')) return;
+  const host = document.getElementById('comboTop3');
+  const bar = document.createElement('div');
+  bar.id = 'algoDebugBar';
+  bar.style.margin = '6px 0 10px';
+  bar.innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button id="dbgRunGreedy">デバッグ: 等間隔貪欲</button>
+      <button id="dbgRunBeam">デバッグ: ビームサーチ</button>
+      <button id="dbgClear">クリア</button>
+    </div>
+    <pre id="dbgAlgoLog" style="font-family:ui-monospace,monospace;background:#f8f8f8;border:1px solid #eee;padding:6px;white-space:pre-wrap"></pre>
+  `;
+  host.prepend(bar);
+
+  const logEl = document.getElementById('dbgAlgoLog');
+  const log = (s)=>{ logEl.textContent += s + '\n'; };
+
+  document.getElementById('dbgRunGreedy').onclick = ()=>{
+    const K = 3;
+    const candGroups = greedyTopKCandidates(restGroups, cumTotals, K);
+    const combos = enumerateCombinations(candGroups, K, 60);
+    const scored = combos.map(cmb=>{
+      const ev = evalByCums(restGroups, cmb, cumTotals);
+      return {cmb, score:ev.score, stats:ev.stats};
+    }).sort((a,b)=>a.score-b.score).slice(0,3);
+    log('[GREEDY top3]');
+    scored.forEach((r,i)=>{
+      log(`#${i+1}: score=${r.score.toFixed(4)}  segN=${r.stats.dist.length}`);
+    });
+    showTop3Combos(scored.map(s=>({
+      score:s.score, stats:s.stats, picksByTrigger:s.cnb??s.cmb, picks:s.cmb.filter(Boolean)
+    })));
+  };
+
+  document.getElementById('dbgRunBeam').onclick = ()=>{
+    const triggersWithCand = (restGroups||[]).reduce((n,g)=>{
+      const valid=(g?.pois||[]).filter(p=>p && p._proj && Number.isFinite(p._proj.cumD));
+      return n + (valid.length?1:0);
+    },0);
+    const top = beamSearch(restGroups, cumTotals, 3, triggersWithCand, 1e6, true);
+    log('[BEAM top3]');
+    top.forEach((r,i)=>{
+      log(`#${i+1}: score=${r.score.toFixed(4)}  segN=${r.stats.dist.length}`);
+    });
+    top.forEach(t=>t.picks = t.picksByTrigger.filter(Boolean));
+    showTop3Combos(top);
+  };
+
+  document.getElementById('dbgClear').onclick = ()=>{
+    logEl.textContent='';
+    document.getElementById('comboTop3').innerHTML='';
+  };
+}
+
+  
 </script>
 </body>
 </html>
+
+
 
 
