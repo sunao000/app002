@@ -1618,27 +1618,25 @@ function enumerateAllOnePerTrigger(groups, hardCap=200000){
 
 // 表示とCSV出力
 function renderLinearResults(rows){
-  // rows: [{meters, km, picks, idxes}]
   const cont = document.getElementById('linearList');
   const sum  = document.getElementById('linearSummary');
   if(!cont || !sum) return;
 
-  // 上位100件だけ表示（残りはCSVで）
-  const SHOW = 100;
+  // --- 表示件数を上位3件に制限 ---
+  const SHOW = 3;
   const shown = rows.slice(0, SHOW);
 
   let text = '';
   shown.forEach((r,i)=>{
-    // 例: #1 123.45 km | idx=[0,1,2] | names=[A,B,C]
     const names = r.picks.map(p=> p?.name || 'POI').join(' -> ');
     text += `#${i+1}  ${r.km.toFixed(2)} km  |  idx=${JSON.stringify(r.idxes)}  |  ${names}\n`;
   });
   cont.textContent = text || '(該当なし)';
 
-  const msg = `総組合せ数: ${rows.length.toLocaleString()} 件（上位 ${Math.min(SHOW, rows.length)} 件を表示）`;
+  const msg = `総組合せ数: ${rows.length.toLocaleString()} 件（上位 ${Math.min(SHOW, rows.length)} 件を表示／CSVは全件出力可能）`;
   sum.textContent = msg;
 
-  // CSV用に保管
+  // CSV全件は保持
   window.__linear_rows_for_csv = rows;
   const csvBtn = document.getElementById('btnDownloadLinearCsv');
   if(csvBtn) csvBtn.disabled = rows.length===0;
@@ -2245,5 +2243,6 @@ function dpSearch(restGroups, cumTotals){
 </script>
 </body>
 </html>
+
 
 
