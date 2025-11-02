@@ -1714,7 +1714,7 @@ function injectAlgoDebugButtons(cumTotals){
   };
 }
 
-/* ==================== 距離ユーティリティ ==================== */
+/* ==================== 直線距離のみで組合せ合計 ==================== */
 // 直線距離[m]
 function haversineM(lat1, lon1, lat2, lon2){
   const R = 6371000;
@@ -1723,25 +1723,14 @@ function haversineM(lat1, lon1, lat2, lon2){
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat/2)**2 +
             Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
-  const c = 2 * Math.asin(Math.min(1, Math.sqrt(a))); // 丸め誤差で>1になってもクランプ
+  const c = 2 * Math.asin(Math.min(1, Math.sqrt(a)));
   return R * c;
 }
 
-// ルート経由の近似距離[m]（POI→ルート直交足＋ルート沿い＋直交足）※API不要
-function approxRouteDistanceM(p, q, routeCums, beta=1.1){
-  const { cum, coords } = routeCums; // window.__routeCums を渡す
-  const P = projectToRoute(p.lat, p.lon, coords, cum);
-  const Q = projectToRoute(q.lat, q.lon, coords, cum);
-  const along = Math.abs(P.cumD - Q.cumD);                            // ルート上[m]
-  const legs  = (Number(P.perpM||0) + Number(Q.perpM||0)) * beta;     // 直交足（補正係数）
-  return along + legs;
-}
-
-/* ==================== 組み合わせ総距離 ==================== */
-// 各トリガーから1件ずつの直積を列挙（各層 最大 perGroupLimit 件）
+// 各トリガーから1件ずつの組合せを列挙（各層最大 perGroupLimit 件）
 function enumerateExactOnePerTrigger(restGroups, perGroupLimit=5, hardCap=10000){
   const groups = restGroups.map(g => (g?.pois||[]).slice(0, perGroupLimit));
-  if (groups.some(g => g.length === 0)) return []; // どこか0件なら生成不可
+  if (groups.some(g => g.length === 0)) return [];
   let totalComb = 1; for (const g of groups) totalComb *= g.length;
   if (totalComb > hardCap) console.warn(`[enumerate] ${totalComb}通り → 打ち切り(${hardCap})`);
 
@@ -1758,58 +1747,44 @@ function enumerateExactOnePerTrigger(restGroups, perGroupLimit=5, hardCap=10000)
   return out;
 }
 
-// 1つの組み合わせについて、Start→…→Goal の合計距離[m]
-function comboTotalDistanceM(picksArray, start, goal, mode='route', routeCums=window.__routeCums){
+// Start→…→Goal の合計距離[m]（直線のみ）
+function comboTotalDistanceStraight(picksArray, start, goal){
   const seq = [start, ...picksArray, goal];
   let sum = 0;
   for (let i=1; i<seq.length; i++){
     const a = seq[i-1], b = seq[i];
-    if (mode === 'straight') sum += haversineM(a.lat,a.lon,b.lat,b.lon);
-    else                     sum += approxRouteDistanceM(a,b, routeCums, /*beta=*/1.1);
+    if (!a || !b) continue;
+    sum += haversineM(a.lat,a.lon,b.lat,b.lon);
   }
   return sum;
 }
 
-/* ==================== 一括計算→ランキング表示（実線描画ボタン付き） ==================== */
-async function computeAllComboTotals(mode='route', opts={}){
-  // 前提チェック
+// 一括計算＋ランキング表示
+async function computeAllComboTotalsStraight(){
   if (!routeData.fastest){ alert('先に「休憩場所検索」を実行してください。'); return; }
   if (!Array.isArray(restGroups) || !restGroups.length){ alert('休憩トリガーがありません。'); return; }
   const start = pts.find(p=>p.type==='start') || pts[0];
   const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
   if (!start || !goal){ alert('Start/Goal が不正'); return; }
 
-  // ルート累積（道のり近似で必要）
-  ensureProjections();
-  const routeCums = window.__routeCums;
-
-  // 列挙（各層 最大5件、総数1万で打ち切り）
-  const perGroupLimit = Number(opts.perGroupLimit ?? 5);
-  const hardCap       = Number(opts.hardCap ?? 10000);
-  const combos = enumerateExactOnePerTrigger(restGroups, perGroupLimit, hardCap);
+  const combos = enumerateExactOnePerTrigger(restGroups, 5, 10000);
   if (!combos.length){ alert('各トリガーに候補が不足しています'); return; }
 
-  // 合計距離計算
   const results = combos.map(picks => ({
-    totalM: comboTotalDistanceM(picks, start, goal, mode, routeCums),
-    picksByTrigger: picks, picks, mode
+    totalM: comboTotalDistanceStraight(picks, start, goal),
+    picks
   })).sort((a,b)=>a.totalM - b.totalM);
 
-  // ランキングを #comboTop3 に描画（上位3件）
   const box = document.getElementById('comboTop3');
-  if (!box) return results;
+  if (!box) return;
 
-  // 古いランキング見出しを重ねないよう軽く掃除
-  // （既存の組合せUIは残し、今回のブロックだけ消す）
+  // 古い表示を掃除
   Array.from(box.querySelectorAll('.combo-total-block')).forEach(n=>n.remove());
-
-  const unit = mode==='straight' ? '（直線合計）' : '（道のり近似合計）';
   const wrap = document.createElement('div');
   wrap.className = 'combo-total-block';
   wrap.style.margin = '10px 0';
-
   const head = document.createElement('div');
-  head.innerHTML = `<b>距離合計ランキング ${unit}</b>`;
+  head.innerHTML = `<b>距離合計ランキング（直線）</b>`;
   head.style.marginBottom = '6px';
   wrap.appendChild(head);
 
@@ -1819,224 +1794,33 @@ async function computeAllComboTotals(mode='route', opts={}){
     card.style.border='1px dashed #bbb';
     card.style.padding='8px';
     card.style.margin='6px 0';
-
-    // 採用POI一覧
     const items = r.picks.map((p,i)=> `${i+1}. ${p.name} (${p.lat.toFixed(5)},${p.lon.toFixed(5)})`).join('<br>');
-
     card.innerHTML = `
       <div style="font-weight:700">#${idx+1} 合計 ${dkm} km</div>
       <div style="margin-top:4px">${items}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-        <button class="btn-show-markers">マーカーだけ表示（APIゼロ）</button>
-        <button class="btn-show-line">このルートを表示（実線・ORS）</button>
-      </div>
     `;
-
-    // ボタン動作
-    card.querySelector('.btn-show-markers').onclick = ()=>{
-      setComboMarkers(start, r.picks, goal);        // 採用POIのみのマーカーに切り替え
-    };
-    card.querySelector('.btn-show-line').onclick = async (ev)=>{
-      const btn = ev.currentTarget;
-      btn.disabled = true;
-      const old = btn.textContent;
-      btn.textContent = '生成中...';
-      try{
-        // ORS 実線描画（既存ヘルパ使用）
-        const profile = document.getElementById('profileSelect')?.value || 'cycling-road';
-        const wps = [start, ...r.picks, goal].map(p=>({lat:p.lat, lon:p.lon, name:p.name || 'POI'}));
-        const out = await routeLegStatsForWaypoints(wps, profile);
-        const feature = out?.feature;
-        if (!feature){ alert('ルートを生成できませんでした。'); return; }
-
-        // 線を表示
-        clearRouteLayers();
-        const color = '#00aa88';
-        const layer = L.geoJSON(feature, { style:{ color, weight: 7 } }).addTo(map);
-        routeLayers['combo-total#'+(idx+1)] = layer;
-
-        // マーカーも該当POIだけに切替
-        setComboMarkers(start, r.picks, goal);
-
-        if (layer.getBounds && layer.getBounds().isValid && layer.getBounds().isValid()){
-          map.fitBounds(layer.getBounds().pad(0.1));
-        }
-        setActiveButton(null);
-      }catch(e){
-        console.error(e);
-        const hints = [
-          !ORS_KEY ? 'ORS_KEY が未設定' : null,
-          !(pts && pts.length>=2) ? 'Start/Goal が不正' : null,
-        ].filter(Boolean).join(' / ');
-        alert('実線描画でエラー: ' + (e.message || e) + (hints ? '\nヒント: ' + hints : ''));
-      }finally{
-        btn.disabled = false;
-        btn.textContent = old;
-      }
-    };
-
+    card.onclick = ()=> setComboMarkers(start, r.picks, goal); // クリックでマーカー切替
     wrap.appendChild(card);
   });
-
   box.prepend(wrap);
-  return results;
 }
 
-/* ===== ワンクリック用ボタンをページに追加 ===== */
-(function injectTotalButtons(){
+/* ボタン追加（直線のみ） */
+(function injectTotalButtonsStraight(){
   const host = document.getElementById('comboTop3') || document.body;
-  if (!host || document.getElementById('btnTotalStraight')) return;
-  const wrap = document.createElement('div');
-  wrap.style.display='flex'; wrap.style.gap='6px'; wrap.style.flexWrap='wrap'; wrap.style.margin='8px 0';
-  wrap.innerHTML = `
-    <button id="btnTotalRoute">組合せの距離合計（道のり近似）</button>
-    <button id="btnTotalStraight">組合せの距離合計（直線）</button>
-  `;
-  host.prepend(wrap);
-  document.getElementById('btnTotalRoute').onclick    = ()=>computeAllComboTotals('route');
-  document.getElementById('btnTotalStraight').onclick = ()=>computeAllComboTotals('straight');
-})();
-
-/* ==== 座標ベース累積を作る（安全） ==== */
-/* ===== ルート座標ベース累積（coords長と一致）===== */
-function buildCumsByCoords(feature){
-  const coords = feature?.geometry?.coordinates || [];
-  const cumD = [0];
-  for(let i=1;i<coords.length;i++){
-    const a = L.latLng(coords[i-1][1], coords[i-1][0]);
-    const b = L.latLng(coords[i][1],   coords[i][0]);
-    cumD[i] = cumD[i-1] + a.distanceTo(b);
-  }
-  return { coords, cumD_byCoord: cumD };
-}
-
-/* ==== 座標ベースの直交射影 ==== */
-function projectToRouteByCoord(lat, lon, coords, cumD_byCoord){
-  if (!Array.isArray(coords) || coords.length < 2){
-    return { cumD: NaN, perpM: NaN };
-  }
-  const P = L.latLng(lat, lon);
-  let best = { i0:0, i1:1, t:0, dist: Infinity };
-
-  for (let i=1;i<coords.length;i++){
-    const A = L.latLng(coords[i-1][1], coords[i-1][0]);
-    const B = L.latLng(coords[i][1],   coords[i][0]);
-    // 緯度経度の近似直線でtを求める（短区間なのでOK）
-    const AB = [B.lat - A.lat, B.lng - A.lng];
-    const AP = [P.lat - A.lat, P.lng - A.lng];
-    const ab2 = AB[0]*AB[0] + AB[1]*AB[1] || 1e-12;
-    const t = Math.max(0, Math.min(1, (AP[0]*AB[0] + AP[1]*AB[1]) / ab2));
-    const Q = L.latLng(A.lat + AB[0]*t, A.lng + AB[1]*t);
-    const d = P.distanceTo(Q);
-    if (d < best.dist) best = { i0:i-1, i1:i, t, dist:d };
-  }
-  const segLen = (() => {
-    const a = L.latLng(coords[best.i0][1], coords[best.i0][0]);
-    const b = L.latLng(coords[best.i1][1], coords[best.i1][0]);
-    return a.distanceTo(b);
-  })();
-
-  const baseCum = Number(cumD_byCoord[best.i0]);
-  const cumD = (Number.isFinite(baseCum) ? baseCum : 0) + best.t * (Number(segLen) || 0);
-
-  return {
-    cumD: Number.isFinite(cumD) ? cumD : NaN,
-    perpM: Number.isFinite(best.dist) ? best.dist : NaN
-  };
-}
-
-/* ==== routeCums（既存）に座標ベースも載せる ==== */
-function ensureRouteCumsByCoord(){
-  const base = (routeData?.arterial) || (routeData?.fastest);
-  if (!base || !base.geometry?.coordinates?.length) return null;
-  if (window.__routeCumsByCoord &&
-      window.__routeCumsByCoord.coords === base.geometry.coordinates) {
-    return window.__routeCumsByCoord; // 既に現行座標で作成済み
-  }
-  window.__routeCumsByCoord = buildCumsByCoords(base);
-  return window.__routeCumsByCoord;
-}
-
-/* ==== 直線距離（既存のままでOK） ==== */
-function haversineM(lat1, lon1, lat2, lon2){
-  const R = 6371000;
-  const toRad = d => d*Math.PI/180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat/2)**2 +
-            Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-  const c = 2*Math.atan2(Math.sqrt(Math.sqrt(a*a) ? a : 0), Math.sqrt(1-(Math.sqrt(a*a) ? a : 0))); // 安全化
-  return R*c;
-}
-
-/* ==== 道のり近似（座標ベース射影を使用） ==== */
-function approxRouteDistanceM_safe(a, b, beta=1.1){
-  const rc = ensureRouteCumsByCoord();
-  if (!rc) return haversineM(a.lat,a.lon,b.lat,b.lon); // ルートが無いなら直線で代替
-  const { coords, cumD_byCoord } = rc;
-  const P = projectToRouteByCoord(a.lat, a.lon, coords, cumD_byCoord);
-  const Q = projectToRouteByCoord(b.lat, b.lon, coords, cumD_byCoord);
-  if (!Number.isFinite(P.cumD) || !Number.isFinite(Q.cumD)){
-    // 射影が失敗した場合は直線距離にフォールバック（NaN防止）
-    return haversineM(a.lat,a.lon,b.lat,b.lon);
-  }
-  const along = Math.abs(P.cumD - Q.cumD);
-  const legs  = (Number(P.perpM||0) + Number(Q.perpM||0)) * beta;
-  const total = along + legs;
-  return Number.isFinite(total) ? total : haversineM(a.lat,a.lon,b.lat,b.lon);
-}
-/* ===== サニタイズと合計距離（NaNガード＆デバッグ）===== */
-function __isValidPoint(p){
-  return p && Number.isFinite(p.lat) && Number.isFinite(p.lon);
-}
-function comboTotalDistanceM_SAFE(picksArray, start, goal, mode='route'){
-  const seq = [start, ...(picksArray||[]), goal];
-  // 欠損チェック
-  for (let i=0; i<seq.length; i++){
-    const p = seq[i];
-    if (!__isValidPoint(p)){
-      console.error('[distance] invalid point at index', i, p);
-      return NaN;
-    }
-  }
-  let sum = 0;
-  for (let i=1; i<seq.length; i++){
-    const a = seq[i-1], b = seq[i];
-    const d = (mode === 'straight')
-      ? haversineM(a.lat,a.lon,b.lat,b.lon)
-      : approxRouteDistanceM_safe(a,b, /*beta=*/1.1);
-    if (!Number.isFinite(d)){
-      console.error('[distance] NaN leg', {iFrom:i-1, iTo:i, a, b, mode, d});
-      return NaN;
-    }
-    sum += d;
-  }
-  return sum;
-}
-
-/* ==== computeAllComboTotals 内の呼び出しをこれに差し替え ==== */
-// 既存の computeAllComboTotals の「合計距離計算」部分を以下の1行に置き換え
-// （他はそのままでOK）
-//
-// const results = combos.map(picks => ({
-//   totalM: comboTotalDistanceM_SAFE(picks, start, goal, mode),
-//   picksByTrigger: picks, picks, mode
-// })).sort((a,b)=>a.totalM - b.totalM);
-
-// computeAllComboTotals(...) の combos.map の前に仮で置くと良い
-(function quickSanity(){
-  const rc = ensureRouteCumsByCoord();
-  if (!rc) console.warn('[sanity] __routeCumsByCoord 未生成（直線フォールバックします）');
-  const start = pts.find(p=>p.type==='start') || pts[0];
-  const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
-  console.log('[sanity] start=', start, 'goal=', goal);
-  console.log('[sanity] restGroups#', restGroups?.length,
-              restGroups?.map((g,i)=>({i, pois:g?.pois?.length || 0})));
+  if (!host || document.getElementById('btnTotalStraightOnly')) return;
+  const btn = document.createElement('button');
+  btn.id = 'btnTotalStraightOnly';
+  btn.textContent = '組合せの距離合計（直線のみ）';
+  btn.style.margin='8px 0';
+  btn.onclick = computeAllComboTotalsStraight;
+  host.prepend(btn);
 })();
 
 </script>
 </body>
 </html>
+
 
 
 
