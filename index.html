@@ -1647,18 +1647,35 @@ function renderLinearResults(rows){
 function downloadLinearCsv(){
   const rows = window.__linear_rows_for_csv || [];
   if(!rows.length) return;
+
+  // CSV行を作る（ダブルクォートでエスケープ）
+  const esc = s => String(s).replace(/"/g,'""');
   const header = ['rank','total_km','indices_per_trigger','poi_names'];
   const lines = [header.join(',')];
+
   rows.forEach((r,i)=>{
-    const names = r.picks.map(p=> (p?.name||'POI').replace(/["\n\r,]/g,' ')).join(' -> ');
-    lines.push([i+1, r.km.toFixed(3), `"${JSON.stringify(r.idxes)}"`, `"${names}"`].join(','));
+    const names = r.picks.map(p=> (p?.name ?? 'POI')).join(' -> ');
+    lines.push([
+      i+1,
+      r.km.toFixed(3),
+      `"${esc(JSON.stringify(r.idxes))}"`,
+      `"${esc(names)}"`
+    ].join(','));
   });
-  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+
+  // 重要：UTF-8 BOM を先頭に付ける + CRLF 改行（Excel対策）
+  const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+  const csv = lines.join('\r\n');
+  const blob = new Blob([bom, csv], { type: 'text/csv;charset=utf-8' });
+
   const url  = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'linear_combinations.csv'; a.click();
+  a.href = url;
+  a.download = 'linear_combinations.csv';
+  a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 500);
 }
+
 
 // ボタン動作：計算 → 並べ替え → 表示
 function bindLinearButtonsOnce(){
@@ -2228,4 +2245,5 @@ function dpSearch(restGroups, cumTotals){
 </script>
 </body>
 </html>
+
 
