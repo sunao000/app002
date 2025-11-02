@@ -1799,7 +1799,7 @@ async function computeAllComboTotalsStraight(){
       <div style="font-weight:700">#${idx+1} 合計 ${dkm} km</div>
       <div style="margin-top:4px">${items}</div>
     `;
-    card.onclick = ()=> setComboMarkers(start, r.picks, goal); // クリックでマーカー切替
+    card.onclick = ()=> showComboMarkersFallback(start, r.picks, goal);
     wrap.appendChild(card);
   });
   box.prepend(wrap);
@@ -1817,9 +1817,44 @@ async function computeAllComboTotalsStraight(){
   host.prepend(btn);
 })();
 
+  // どこにも依存しない安全なマーカー描画
+function showComboMarkersFallback(start, picksArray, goal){
+  if (!window.map) { console.error('mapが未初期化'); return; }
+
+  // 既存の markerLayer を安全にリセット
+  try { if (window.markerLayer) map.removeLayer(window.markerLayer); } catch(e){}
+  window.markerLayer = L.layerGroup().addTo(map);
+
+  // アイコン（ICONSが無い環境でも動くようフォールバック）
+  const makeIcon = (url)=> new L.Icon({iconUrl:url, iconSize:[32,32], iconAnchor:[16,32]});
+  const ICONS_SAFE = {
+    start: (window.ICONS && window.ICONS.start) || makeIcon('https://maps.gstatic.com/mapfiles/ms2/micons/green-dot.png'),
+    goal:  (window.ICONS && window.ICONS.goal)  || makeIcon('https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png'),
+    poi:   makeIcon('https://maps.gstatic.com/mapfiles/ms2/micons/purple-dot.png')
+  };
+
+  // ユーティリティ
+  const add = (p, icon, label)=>{
+    if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
+    L.marker([p.lat, p.lon], {icon}).bindTooltip(label||'').addTo(window.markerLayer);
+  };
+
+  // スタート → 採用POI群 → ゴール
+  add(start, ICONS_SAFE.start, start?.name || 'スタート');
+  (picksArray || []).forEach((p, i)=> add(p, ICONS_SAFE.poi, `${p?.name||'休憩'} #${i+1}`));
+  add(goal, ICONS_SAFE.goal, goal?.name || 'ゴール');
+
+  // 全体が見えるようにフィット
+  try {
+    const b = window.markerLayer.getBounds();
+    if (b.isValid()) map.fitBounds(b.pad(0.1));
+  } catch(e){}
+}
+
 </script>
 </body>
 </html>
+
 
 
 
