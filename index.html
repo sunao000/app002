@@ -159,6 +159,17 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 
 
 <!-- ルート検索アルゴリズム -->
+<!-- 直線距離（全組み合わせ） -->
+<div class="section">
+  <h3>直線距離（全組み合わせ）</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+    <button id="btnCalcLinear">直線距離を計算（1トリガー1件 × 全組合せ）</button>
+    <button id="btnDownloadLinearCsv" disabled>CSVダウンロード</button>
+  </div>
+  <div id="linearSummary" style="font-size:0.9rem;color:#555"></div>
+  <div id="linearList" style="font-family:ui-monospace,monospace;white-space:pre;max-height:260px;overflow:auto;border:1px solid #eee;padding:6px"></div>
+</div>
+
 <div class="section">
   <label>探索アルゴリズム
     <select id="algoSelect">
@@ -1247,18 +1258,6 @@ out center;`;
 
 
 /* ===== 小ユーティリティ ===== */
-// ★ 出発→（採用POI）→ゴールの“直線（測地線）”合計距離[m]
-function totalGeodesicDistance(start, picksByTrigger, goal){
-  const seq = [start, ...(picksByTrigger || []).filter(Boolean), goal];
-  let sum = 0;
-  for(let i=1;i<seq.length;i++){
-    const a = L.latLng(seq[i-1].lat, seq[i-1].lon);
-    const b = L.latLng(seq[i].lat,   seq[i].lon);
-    sum += a.distanceTo(b); // m
-  }
-  return sum; // m
-}
-  
 function sanitizeCoord(n, fallback) {
   const v = Number(n);
   if (!isFinite(v)) return Number(fallback);
@@ -1373,8 +1372,7 @@ function showTop3Combos(resultList){
     box.textContent = '候補がありません（休憩トリガーやPOIが不足）';
     return;
   }
-  const start = pts.find(p=>p.type==='start') || pts[0];
-  const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+
   const sd = (a)=>{ if(!a.length) return 0;
     const m=a.reduce((x,y)=>x+y,0)/a.length;
     return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length);
@@ -1391,36 +1389,17 @@ function showTop3Combos(resultList){
     wrap.style.marginBottom='8px';
 
     const header = document.createElement('div');
-   const picksArray = (r.picksByTrigger && Array.isArray(r.picksByTrigger))
-     ? r.picksByTrigger.filter(Boolean)
-     : (r.picks || []);
-   // 出発→（採用POI）→ゴールの“直線（測地線）”合計距離
-  let sumLineKm = '';
-  if (start && goal) {
-    const totalM = totalGeodesicDistance(start, picksArray, goal); // ← 既に定義済みの関数
-    sumLineKm = (totalM / 1000).toFixed(2) + ' km';
-  }
-  //   distFromTriggerM は fetchPoisAround() で各POIに付与済み
-  let sumTriggerToPoiKm = '';
-  if (picksArray.length) {
-    const totalM = picksArray.reduce((acc, p) => acc + (Number(p?.distFromTriggerM) || 0), 0);
-    sumTriggerToPoiKm = (totalM / 1000).toFixed(2) + ' km';
-  }
-
-
-header.innerHTML = `
-  <div style="font-weight:700;margin-bottom:4px">
-    #${rank}　スコア（σ合計）: ${(sd(r.stats.dist)+sd(r.stats.time)+sd(r.stats.energy)).toFixed(3)}
-    ${typeof r.rawScore === 'number' ? `<span style="color:#777">（総当たり: 補正後=${r.score.toFixed(3)} / 素=${r.rawScore.toFixed(3)}）</span>` : ''}
-  </div>
-  <div style="margin-top:4px">
-    距離σ=${sd(r.stats.dist).toFixed(2)} km　
-    時間σ=${sd(r.stats.time).toFixed(2)} 分　
-    エネルギーσ=${sd(r.stats.energy).toFixed(2)} kJ
-  </div>
-  ${sumLineKm ? `<div style="margin-top:2px;color:#555">合計直線距離: <b>${sumLineKm}</b></div>` : ''}
-  ${sumTriggerToPoiKm ? `<div style="margin-top:2px;color:#777">トリガー→採用POI 直線距離合計: <b>${sumTriggerToPoiKm}</b></div>` : ''}
-`;
+    header.innerHTML = `
+      <div style="font-weight:700;margin-bottom:4px">
+        #${rank}　スコア（σ合計）: ${(sd(r.stats.dist)+sd(r.stats.time)+sd(r.stats.energy)).toFixed(3)}
+        ${typeof r.rawScore === 'number' ? `<span style="color:#777">（総当たり: 補正後=${r.score.toFixed(3)} / 素=${r.rawScore.toFixed(3)}）</span>` : ''}
+      </div>
+      <div style="margin-top:4px">
+        距離σ=${sd(r.stats.dist).toFixed(2)} km　
+        時間σ=${sd(r.stats.time).toFixed(2)} 分　
+        エネルギーσ=${sd(r.stats.energy).toFixed(2)} kJ
+      </div>
+    `;
     wrap.appendChild(header);
 
     const list = document.createElement('div');
@@ -1567,6 +1546,168 @@ return (SCORE_WEIGHTS.wAlign * (alignM/1000)) +
 
 
 /* ===== 組み合わせルート探索＆評価ユーティリティ ===== */
+
+/* ===== 直線距離: 全組み合わせ（各トリガーで1件） ===== */
+
+// スタート/ゴール取得（保険つき）
+function getStartGoalPoints(){
+  const start = pts.find(p=>p.type==='start') || pts[0];
+  const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+  if(!start || !goal) throw new Error('スタート/ゴールが見つかりません');
+  return {start, goal};
+}
+
+// POI群（各トリガー）から「最大5件だけ」取り出す（射影が無くてもOK）
+function topPoisPerTriggerForLinear(maxPer=5){
+  if(!Array.isArray(restGroups) || !restGroups.length) throw new Error('休憩トリガーがありません');
+  // とりあえず「トリガーからの距離 + ルート直交距離」の小さい順で切り出し（無ければある情報だけ）
+  return restGroups.map((g,i)=>{
+    const arr = (g?.pois || []).slice();
+    // 「候補なし」のトリガーがあると組み合わせが成立しないので、ここで弾く
+    if(!arr.length) throw new Error(`トリガー#${i+1} に候補POIがありません`);
+    const score = p=>{
+      const a = Number(p?.distFromTriggerM) || 0;
+      const b = Number(p?._proj?.perpM) || 0;
+      return a + b;
+    };
+    arr.sort((x,y)=> score(x)-score(y));
+    return arr.slice(0, Math.max(1, Math.min(maxPer, arr.length)));
+  });
+}
+
+// 2点間の地上距離（m）
+function llDist(a,b){
+  return L.latLng(a.lat, a.lon).distanceTo([b.lat, b.lon]);
+}
+
+// ある組み合わせ（picks: 各トリガーで1件）に対し、
+// start -> picks[0] -> picks[1] -> ... -> goal の直線合計距離（m）を返す
+function comboLinearDistanceMeters(start, picks, goal){
+  let sum = 0;
+  let prev = start;
+  for(const p of picks){
+    sum += llDist(prev, p);
+    prev = p;
+  }
+  sum += llDist(prev, goal);
+  return sum;
+}
+
+// 全組み合わせを列挙（各トリガー1件必ず選ぶ）
+function enumerateAllOnePerTrigger(groups, hardCap=200000){
+  // groups は [ [p,p,p...], [p,p...], ... ]
+  const out = [];
+  const idx = new Array(groups.length).fill(0);
+  const lens = groups.map(g=>g.length);
+  let total = lens.reduce((a,b)=>a*b,1);
+  if(total>hardCap) total = hardCap; // 爆発防止
+
+  for(let n=0; n<total; n++){
+    // 現在の選択を push
+    out.push(groups.map((g,i)=> g[idx[i]]));
+    // 次の組み合わせへ
+    for(let i=groups.length-1;i>=0;i--){
+      idx[i]++;
+      if(idx[i] < lens[i]) break;
+      idx[i]=0;
+      if(i===0) return out; // 全探索完了
+    }
+  }
+  return out;
+}
+
+// 表示とCSV出力
+function renderLinearResults(rows){
+  // rows: [{meters, km, picks, idxes}]
+  const cont = document.getElementById('linearList');
+  const sum  = document.getElementById('linearSummary');
+  if(!cont || !sum) return;
+
+  // 上位100件だけ表示（残りはCSVで）
+  const SHOW = 100;
+  const shown = rows.slice(0, SHOW);
+
+  let text = '';
+  shown.forEach((r,i)=>{
+    // 例: #1 123.45 km | idx=[0,1,2] | names=[A,B,C]
+    const names = r.picks.map(p=> p?.name || 'POI').join(' -> ');
+    text += `#${i+1}  ${r.km.toFixed(2)} km  |  idx=${JSON.stringify(r.idxes)}  |  ${names}\n`;
+  });
+  cont.textContent = text || '(該当なし)';
+
+  const msg = `総組合せ数: ${rows.length.toLocaleString()} 件（上位 ${Math.min(SHOW, rows.length)} 件を表示）`;
+  sum.textContent = msg;
+
+  // CSV用に保管
+  window.__linear_rows_for_csv = rows;
+  const csvBtn = document.getElementById('btnDownloadLinearCsv');
+  if(csvBtn) csvBtn.disabled = rows.length===0;
+}
+
+function downloadLinearCsv(){
+  const rows = window.__linear_rows_for_csv || [];
+  if(!rows.length) return;
+  const header = ['rank','total_km','indices_per_trigger','poi_names'];
+  const lines = [header.join(',')];
+  rows.forEach((r,i)=>{
+    const names = r.picks.map(p=> (p?.name||'POI').replace(/["\n\r,]/g,' ')).join(' -> ');
+    lines.push([i+1, r.km.toFixed(3), `"${JSON.stringify(r.idxes)}"`, `"${names}"`].join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'linear_combinations.csv'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 500);
+}
+
+// ボタン動作：計算 → 並べ替え → 表示
+function bindLinearButtonsOnce(){
+  const calcBtn = document.getElementById('btnCalcLinear');
+  const csvBtn  = document.getElementById('btnDownloadLinearCsv');
+  if(!calcBtn) return;
+  if(calcBtn.__bound) return; // 二重バインド防止
+  calcBtn.__bound = true;
+
+  calcBtn.onclick = ()=>{
+    try{
+      const {start, goal} = getStartGoalPoints();
+      const groups = topPoisPerTriggerForLinear(5); // 各トリガー最大5件
+      // 総組合せチェック（多すぎる場合は注意だけ出す）
+      const total = groups.reduce((a,b)=>a*b.length,1);
+      if(total > 200000){
+        if(!confirm(`組合せが ${total.toLocaleString()} 件あります。上限20万件まで計算します。続行しますか？`)) return;
+      }
+      const combos = enumerateAllOnePerTrigger(groups, /*hardCap*/200000);
+
+      // 距離計算
+      const rows = combos.map(idxPicks=>{
+        const meters = comboLinearDistanceMeters(start, idxPicks, goal);
+        return {
+          meters,
+          km: meters/1000,
+          picks: idxPicks,
+          idxes: idxPicks.map((p, i)=> groups[i].indexOf(p)) // どのインデックスを選んだか
+        };
+      });
+
+      // 合計距離が短い順にソート
+      rows.sort((a,b)=>a.meters - b.meters);
+
+      renderLinearResults(rows);
+    }catch(e){
+      alert('直線距離計算エラー: ' + (e.message || e));
+      console.error(e);
+    }
+  };
+
+  if(csvBtn){
+    csvBtn.onclick = ()=> downloadLinearCsv();
+  }
+}
+
+// 初期化時にバインド
+window.addEventListener('DOMContentLoaded', bindLinearButtonsOnce);
+
 
 // 休憩トリガーごとに1地点ずつ選ぶ全組み合わせを列挙（上限あり）
 function enumerateCombinations(poiGroups, perGroupLimit = 3, hardCap = 60){
