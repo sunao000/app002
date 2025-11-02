@@ -1714,10 +1714,140 @@ function injectAlgoDebugButtons(cumTotals){
   };
 }
 
+/* ==================== 距離ユーティリティ ==================== */
+// 直線距離[m]
+function haversineM(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const toRad = d => d*Math.PI/180;
+  const dLat = toRad(lat2-lat1);
+  const dLon = toRad(lat2-lon1 ? toRad(lon2-lon1) : toRad(lon2 - lon1)); // safety
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R*c;
+}
+
+// ルート経由の近似距離[m]（POI→ルート直交足＋ルート沿い＋直交足）※API不要
+function approxRouteDistanceM(p, q, routeCums, beta=1.1){
+  const { cum, coords } = routeCums; // window.__routeCums を渡す
+  const P = projectToRoute(p.lat, p.lon, coords, cum);
+  const Q = projectToRoute(q.lat, q.lon, coords, cum);
+  const along = Math.abs(P.cumD - Q.cumD);                    // ルート上[m]
+  const legs  = (Number(P.perpM||0) + Number(Q.perpM||0)) * beta; // 直交足
+  return along + legs;
+}
+
+/* ==================== 組み合わせ総距離 ==================== */
+// 各トリガーから1件ずつの直積を列挙（各層 最大 perGroupLimit 件）
+function enumerateExactOnePerTrigger(restGroups, perGroupLimit=5, hardCap=10000){
+  const groups = restGroups.map(g => (g?.pois||[]).slice(0, perGroupLimit));
+  // どこかの層が0件なら組み合わせは作れない
+  if (groups.some(g => g.length === 0)) return [];
+  // 上限を超える爆発を抑制
+  let totalComb = 1; for (const g of groups) totalComb *= g.length;
+  if (totalComb > hardCap) console.warn(`[enumerate] ${totalComb}通り → 打ち切り(${hardCap})`);
+
+  const out = [];
+  function dfs(i, acc){
+    if (out.length >= hardCap) return;
+    if (i === groups.length){ out.push(acc.slice()); return; }
+    for (const p of groups[i]){
+      if (out.length >= hardCap) break;
+      acc.push(p); dfs(i+1, acc); acc.pop();
+    }
+  }
+  dfs(0, []);
+  return out;
+}
+
+// 1つの組み合わせについて、Start→…→Goal の合計距離[m]
+function comboTotalDistanceM(picksArray, start, goal, mode='route', routeCums=window.__routeCums){
+  const seq = [start, ...picksArray, goal];
+  let sum = 0;
+  for (let i=1; i<seq.length; i++){
+    const a = seq[i-1], b = seq[i];
+    if (mode === 'straight') sum += haversineM(a.lat,a.lon,b.lat,b.lon);
+    else                     sum += approxRouteDistanceM(a,b, routeCums, /*beta=*/1.1);
+  }
+  return sum;
+}
+
+/* ==================== 一括計算→上位表示 ==================== */
+async function computeAllComboTotals(mode='route', opts={}){
+  // 前提チェック
+  if (!routeData.fastest){ alert('先に「休憩場所検索」を実行してください。'); return; }
+  if (!Array.isArray(restGroups) || !restGroups.length){ alert('休憩トリガーがありません。'); return; }
+  const start = pts.find(p=>p.type==='start') || pts[0];
+  const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+  if (!start || !goal){ alert('Start/Goal が不正'); return; }
+
+  // ルート累積（道のり近似に必要）
+  ensureProjections();
+  const routeCums = window.__routeCums;
+
+  // 列挙（各層 最大5件、総数1万で打ち切り）
+  const perGroupLimit = Number(opts.perGroupLimit ?? 5);
+  const hardCap       = Number(opts.hardCap ?? 10000);
+  const combos = enumerateExactOnePerTrigger(restGroups, perGroupLimit, hardCap);
+  if (!combos.length){ alert('各トリガーに候補が不足しています'); return; }
+
+  // 合計距離計算
+  const results = combos.map(picks => ({
+    totalM: comboTotalDistanceM(picks, start, goal, mode, routeCums),
+    picksByTrigger: picks, picks, mode
+  })).sort((a,b)=>a.totalM - b.totalM);
+
+  // 上位3件を #comboTop3 に追加表示
+  const box = document.getElementById('comboTop3');
+  if (box){
+    const unit = mode==='straight' ? '（直線合計）' : '（道のり近似合計）';
+    const head = document.createElement('div');
+    head.style.margin='8px 0';
+    head.innerHTML = `<b>距離合計ランキング ${unit}</b>`;
+    box.prepend(head);
+
+    results.slice(0,3).forEach((r, idx)=>{
+      const dkm = (r.totalM/1000).toFixed(2);
+      const div = document.createElement('div');
+      div.style.border='1px dashed #bbb';
+      div.style.padding='6px';
+      div.style.margin='6px 0';
+      const items = r.picks.map((p,i)=> `${i+1}. ${p.name} (${p.lat.toFixed(5)},${p.lon.toFixed(5)})`).join('<br>');
+      div.innerHTML = `#${idx+1} 合計 ${dkm} km<br>${items}`;
+      // クリックでその並びのルートも即表示（見たい時用・APIゼロ）
+      div.style.cursor='pointer';
+      div.onclick = ()=>{
+        // 採用POIだけマーカー表示
+        const s = start, g = goal, picksArray = r.picks;
+        setComboMarkers(s, picksArray, g);
+      };
+      box.appendChild(div);
+    });
+  }
+  return results;
+}
+
+/* ===== 任意：ボタンを自動で追加 ===== */
+(function injectTotalButtons(){
+  const host = document.getElementById('comboTop3') || document.body;
+  if (!host || document.getElementById('btnTotalStraight')) return;
+  const wrap = document.createElement('div');
+  wrap.style.display='flex'; wrap.style.gap='6px'; wrap.style.flexWrap='wrap'; wrap.style.margin='8px 0';
+  wrap.innerHTML = `
+    <button id="btnTotalRoute">組合せの距離合計（道のり近似）</button>
+    <button id="btnTotalStraight">組合せの距離合計（直線）</button>
+  `;
+  host.prepend(wrap);
+  document.getElementById('btnTotalRoute').onclick    = ()=>computeAllComboTotals('route');
+  document.getElementById('btnTotalStraight').onclick = ()=>computeAllComboTotals('straight');
+})();
+
+
   
 </script>
 </body>
 </html>
+
 
 
 
