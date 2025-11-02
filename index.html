@@ -117,11 +117,12 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 
 <!-- 休憩トリガー別の候補POI -->
 <div class="section">
-  <>
+  <details open>
     <summary>休憩トリガー別の候補POI</summary>
     <ol id="restPoiPanel" style="margin:0;padding-left:1.1rem;font-size:0.9rem"></ol>
   </details>
 </div>
+
 
 <div class="section">
   <details open>
@@ -765,8 +766,8 @@ async function showRouteLegSummary(){
     const ts = summaryStats(s.time);
     const es = summaryStats(s.energy);
     const label = key==='shortest'?'最短':key==='fastest'?'最速':'勾配';
-    const html = `
-      < style="margin-bottom:8px">
+   const html = `
+      <details style="margin-bottom:8px">
         <summary><b>${label}</b> 区間統計（平均 / 分散 / 標準偏差）</summary>
         距離: ${ds.mean.toFixed(2)} km / ${ds.var.toFixed(2)} km² / σ=${ds.std.toFixed(2)} km<br>
         時間: ${ts.mean.toFixed(2)} 分 / ${ts.var.toFixed(2)} 分² / σ=${ts.std.toFixed(2)} 分<br>
@@ -1267,7 +1268,7 @@ function showTop3Combos(resultList){
         const picksArray = (r.picksByTrigger && Array.isArray(r.picksByTrigger))
           ? r.picksByTrigger.filter(Boolean)
           : (r.picks || []);
-        setComboMarkers(start, picksArray, goal);
+        showComboMarkersFallback(start, picksArray, goal);
 
         if (layer.getBounds && layer.getBounds().isValid && layer.getBounds().isValid()) {
           map.fitBounds(layer.getBounds().pad(0.1));
@@ -1652,7 +1653,6 @@ ${counts || '(none)'}`;
   const ok = (g?.pois||[]).filter(p=>p && p._proj && Number.isFinite(p._proj.cumD)).length;
   console.log(`[projOK] trigger#${i+1}: all=${(g?.pois||[]).length}, projOK=${ok}`);
 });
-dbgShowCumsAndProjections();
 }
 
   
@@ -1854,6 +1854,7 @@ function showComboMarkersFallback(start, picksArray, goal){
 </script>
 </body>
 </html>
+
 
 
 
