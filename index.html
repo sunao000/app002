@@ -1718,13 +1718,13 @@ function injectAlgoDebugButtons(cumTotals){
 // 直線距離[m]
 function haversineM(lat1, lon1, lat2, lon2){
   const R = 6371000;
-  const toRad = d => d*Math.PI/180;
+  const toRad = d => d * Math.PI / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat/2)**2 +
-            Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R*c;
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  const c = 2 * Math.asin(Math.min(1, Math.sqrt(a))); // 丸め誤差で>1になってもクランプ
+  return R * c;
 }
 
 // ルート経由の近似距離[m]（POI→ルート直交足＋ルート沿い＋直交足）※API不要
@@ -1898,6 +1898,7 @@ async function computeAllComboTotals(mode='route', opts={}){
 })();
 
 /* ==== 座標ベース累積を作る（安全） ==== */
+/* ===== ルート座標ベース累積（coords長と一致）===== */
 function buildCumsByCoords(feature){
   const coords = feature?.geometry?.coordinates || [];
   const cumD = [0];
@@ -1906,54 +1907,53 @@ function buildCumsByCoords(feature){
     const b = L.latLng(coords[i][1],   coords[i][0]);
     cumD[i] = cumD[i-1] + a.distanceTo(b);
   }
-  return { coords, cumD };
+  return { coords, cumD_byCoord: cumD };
 }
 
 /* ==== 座標ベースの直交射影 ==== */
 function projectToRouteByCoord(lat, lon, coords, cumD_byCoord){
   if (!Array.isArray(coords) || coords.length < 2){
-    return { cumD: 0, perpM: Infinity };
+    return { cumD: NaN, perpM: NaN };
   }
-  let best = { i0:0, i1:1, t:0, dist: Infinity };
   const P = L.latLng(lat, lon);
+  let best = { i0:0, i1:1, t:0, dist: Infinity };
 
   for (let i=1;i<coords.length;i++){
     const A = L.latLng(coords[i-1][1], coords[i-1][0]);
     const B = L.latLng(coords[i][1],   coords[i][0]);
-    // 緯度経度直線上でのパラメトリック t（0..1）
+    // 緯度経度の近似直線でtを求める（短区間なのでOK）
     const AB = [B.lat - A.lat, B.lng - A.lng];
     const AP = [P.lat - A.lat, P.lng - A.lng];
     const ab2 = AB[0]*AB[0] + AB[1]*AB[1] || 1e-12;
-    let t = (AP[0]*AB[0] + AP[1]*AB[1]) / ab2;
-    t = Math.max(0, Math.min(1, t));
+    const t = Math.max(0, Math.min(1, (AP[0]*AB[0] + AP[1]*AB[1]) / ab2));
     const Q = L.latLng(A.lat + AB[0]*t, A.lng + AB[1]*t);
     const d = P.distanceTo(Q);
     if (d < best.dist) best = { i0:i-1, i1:i, t, dist:d };
   }
-
-  // 区間長（実距離）と累積の補間
-  const segLen = (()=>{
+  const segLen = (() => {
     const a = L.latLng(coords[best.i0][1], coords[best.i0][0]);
     const b = L.latLng(coords[best.i1][1], coords[best.i1][0]);
     return a.distanceTo(b);
   })();
 
-  const cumD =
-    (Number(cumD_byCoord[best.i0]) || 0) +
-    best.t * (Number(segLen) || 0);
+  const baseCum = Number(cumD_byCoord[best.i0]);
+  const cumD = (Number.isFinite(baseCum) ? baseCum : 0) + best.t * (Number(segLen) || 0);
 
   return {
-    cumD,              // 座標ベースの累積距離[m]
-    perpM: best.dist   // ルートへの直交距離[m]
+    cumD: Number.isFinite(cumD) ? cumD : NaN,
+    perpM: Number.isFinite(best.dist) ? best.dist : NaN
   };
 }
 
 /* ==== routeCums（既存）に座標ベースも載せる ==== */
 function ensureRouteCumsByCoord(){
-  const base = routeData.arterial || routeData.fastest;
-  if (!base) return null;
-  const { coords, cumD } = buildCumsByCoords(base);
-  window.__routeCumsByCoord = { coords, cumD_byCoord: cumD };
+  const base = (routeData?.arterial) || (routeData?.fastest);
+  if (!base || !base.geometry?.coordinates?.length) return null;
+  if (window.__routeCumsByCoord &&
+      window.__routeCumsByCoord.coords === base.geometry.coordinates) {
+    return window.__routeCumsByCoord; // 既に現行座標で作成済み
+  }
+  window.__routeCumsByCoord = buildCumsByCoords(base);
   return window.__routeCumsByCoord;
 }
 
@@ -1970,31 +1970,45 @@ function haversineM(lat1, lon1, lat2, lon2){
 }
 
 /* ==== 道のり近似（座標ベース射影を使用） ==== */
-function approxRouteDistanceM_safe(p, q, beta=1.1){
-  const base = window.__routeCumsByCoord || ensureRouteCumsByCoord();
-  if (!base){ return NaN; }
-  const { coords, cumD_byCoord } = base;
-  const P = projectToRouteByCoord(p.lat, p.lon, coords, cumD_byCoord);
-  const Q = projectToRouteByCoord(q.lat, q.lon, coords, cumD_byCoord);
-  const along = Math.abs((P.cumD||0) - (Q.cumD||0));
+function approxRouteDistanceM_safe(a, b, beta=1.1){
+  const rc = ensureRouteCumsByCoord();
+  if (!rc) return haversineM(a.lat,a.lon,b.lat,b.lon); // ルートが無いなら直線で代替
+  const { coords, cumD_byCoord } = rc;
+  const P = projectToRouteByCoord(a.lat, a.lon, coords, cumD_byCoord);
+  const Q = projectToRouteByCoord(b.lat, b.lon, coords, cumD_byCoord);
+  if (!Number.isFinite(P.cumD) || !Number.isFinite(Q.cumD)){
+    // 射影が失敗した場合は直線距離にフォールバック（NaN防止）
+    return haversineM(a.lat,a.lon,b.lat,b.lon);
+  }
+  const along = Math.abs(P.cumD - Q.cumD);
   const legs  = (Number(P.perpM||0) + Number(Q.perpM||0)) * beta;
   const total = along + legs;
-  return Number.isFinite(total) ? total : NaN;
+  return Number.isFinite(total) ? total : haversineM(a.lat,a.lon,b.lat,b.lon);
 }
-
-/* ==== 合計距離ユーティリティ（NaNガード付き） ==== */
+/* ===== サニタイズと合計距離（NaNガード＆デバッグ）===== */
+function __isValidPoint(p){
+  return p && Number.isFinite(p.lat) && Number.isFinite(p.lon);
+}
 function comboTotalDistanceM_SAFE(picksArray, start, goal, mode='route'){
-  const seq = [start, ...picksArray, goal];
+  const seq = [start, ...(picksArray||[]), goal];
+  // 欠損チェック
+  for (let i=0; i<seq.length; i++){
+    const p = seq[i];
+    if (!__isValidPoint(p)){
+      console.error('[distance] invalid point at index', i, p);
+      return NaN;
+    }
+  }
   let sum = 0;
   for (let i=1; i<seq.length; i++){
     const a = seq[i-1], b = seq[i];
-    let d = 0;
-    if (mode === 'straight'){
-      d = haversineM(a.lat,a.lon,b.lat,b.lon);
-    } else {
-      d = approxRouteDistanceM_safe(a,b, /*beta=*/1.1);
+    const d = (mode === 'straight')
+      ? haversineM(a.lat,a.lon,b.lat,b.lon)
+      : approxRouteDistanceM_safe(a,b, /*beta=*/1.1);
+    if (!Number.isFinite(d)){
+      console.error('[distance] NaN leg', {iFrom:i-1, iTo:i, a, b, mode, d});
+      return NaN;
     }
-    if (!Number.isFinite(d)) return NaN; // 早期にNaN返し
     sum += d;
   }
   return sum;
@@ -2009,10 +2023,21 @@ function comboTotalDistanceM_SAFE(picksArray, start, goal, mode='route'){
 //   picksByTrigger: picks, picks, mode
 // })).sort((a,b)=>a.totalM - b.totalM);
 
-  
+// computeAllComboTotals(...) の combos.map の前に仮で置くと良い
+(function quickSanity(){
+  const rc = ensureRouteCumsByCoord();
+  if (!rc) console.warn('[sanity] __routeCumsByCoord 未生成（直線フォールバックします）');
+  const start = pts.find(p=>p.type==='start') || pts[0];
+  const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
+  console.log('[sanity] start=', start, 'goal=', goal);
+  console.log('[sanity] restGroups#', restGroups?.length,
+              restGroups?.map((g,i)=>({i, pois:g?.pois?.length || 0})));
+})();
+
 </script>
 </body>
 </html>
+
 
 
 
