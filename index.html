@@ -1719,8 +1719,8 @@ function injectAlgoDebugButtons(cumTotals){
 function haversineM(lat1, lon1, lat2, lon2){
   const R = 6371000;
   const toRad = d => d*Math.PI/180;
-  const dLat = toRad(lat2-lat1);
-  const dLon = toRad(lat2-lon1 ? toRad(lon2-lon1) : toRad(lon2 - lon1)); // safety
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat/2)**2 +
             Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
   const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
@@ -1732,8 +1732,8 @@ function approxRouteDistanceM(p, q, routeCums, beta=1.1){
   const { cum, coords } = routeCums; // window.__routeCums を渡す
   const P = projectToRoute(p.lat, p.lon, coords, cum);
   const Q = projectToRoute(q.lat, q.lon, coords, cum);
-  const along = Math.abs(P.cumD - Q.cumD);                    // ルート上[m]
-  const legs  = (Number(P.perpM||0) + Number(Q.perpM||0)) * beta; // 直交足
+  const along = Math.abs(P.cumD - Q.cumD);                            // ルート上[m]
+  const legs  = (Number(P.perpM||0) + Number(Q.perpM||0)) * beta;     // 直交足（補正係数）
   return along + legs;
 }
 
@@ -1741,9 +1741,7 @@ function approxRouteDistanceM(p, q, routeCums, beta=1.1){
 // 各トリガーから1件ずつの直積を列挙（各層 最大 perGroupLimit 件）
 function enumerateExactOnePerTrigger(restGroups, perGroupLimit=5, hardCap=10000){
   const groups = restGroups.map(g => (g?.pois||[]).slice(0, perGroupLimit));
-  // どこかの層が0件なら組み合わせは作れない
-  if (groups.some(g => g.length === 0)) return [];
-  // 上限を超える爆発を抑制
+  if (groups.some(g => g.length === 0)) return []; // どこか0件なら生成不可
   let totalComb = 1; for (const g of groups) totalComb *= g.length;
   if (totalComb > hardCap) console.warn(`[enumerate] ${totalComb}通り → 打ち切り(${hardCap})`);
 
@@ -1772,7 +1770,7 @@ function comboTotalDistanceM(picksArray, start, goal, mode='route', routeCums=wi
   return sum;
 }
 
-/* ==================== 一括計算→上位表示 ==================== */
+/* ==================== 一括計算→ランキング表示（実線描画ボタン付き） ==================== */
 async function computeAllComboTotals(mode='route', opts={}){
   // 前提チェック
   if (!routeData.fastest){ alert('先に「休憩場所検索」を実行してください。'); return; }
@@ -1781,7 +1779,7 @@ async function computeAllComboTotals(mode='route', opts={}){
   const goal  = pts.find(p=>p.type==='goal')  || pts[pts.length-1];
   if (!start || !goal){ alert('Start/Goal が不正'); return; }
 
-  // ルート累積（道のり近似に必要）
+  // ルート累積（道のり近似で必要）
   ensureProjections();
   const routeCums = window.__routeCums;
 
@@ -1797,37 +1795,94 @@ async function computeAllComboTotals(mode='route', opts={}){
     picksByTrigger: picks, picks, mode
   })).sort((a,b)=>a.totalM - b.totalM);
 
-  // 上位3件を #comboTop3 に追加表示
+  // ランキングを #comboTop3 に描画（上位3件）
   const box = document.getElementById('comboTop3');
-  if (box){
-    const unit = mode==='straight' ? '（直線合計）' : '（道のり近似合計）';
-    const head = document.createElement('div');
-    head.style.margin='8px 0';
-    head.innerHTML = `<b>距離合計ランキング ${unit}</b>`;
-    box.prepend(head);
+  if (!box) return results;
 
-    results.slice(0,3).forEach((r, idx)=>{
-      const dkm = (r.totalM/1000).toFixed(2);
-      const div = document.createElement('div');
-      div.style.border='1px dashed #bbb';
-      div.style.padding='6px';
-      div.style.margin='6px 0';
-      const items = r.picks.map((p,i)=> `${i+1}. ${p.name} (${p.lat.toFixed(5)},${p.lon.toFixed(5)})`).join('<br>');
-      div.innerHTML = `#${idx+1} 合計 ${dkm} km<br>${items}`;
-      // クリックでその並びのルートも即表示（見たい時用・APIゼロ）
-      div.style.cursor='pointer';
-      div.onclick = ()=>{
-        // 採用POIだけマーカー表示
-        const s = start, g = goal, picksArray = r.picks;
-        setComboMarkers(s, picksArray, g);
-      };
-      box.appendChild(div);
-    });
-  }
+  // 古いランキング見出しを重ねないよう軽く掃除
+  // （既存の組合せUIは残し、今回のブロックだけ消す）
+  Array.from(box.querySelectorAll('.combo-total-block')).forEach(n=>n.remove());
+
+  const unit = mode==='straight' ? '（直線合計）' : '（道のり近似合計）';
+  const wrap = document.createElement('div');
+  wrap.className = 'combo-total-block';
+  wrap.style.margin = '10px 0';
+
+  const head = document.createElement('div');
+  head.innerHTML = `<b>距離合計ランキング ${unit}</b>`;
+  head.style.marginBottom = '6px';
+  wrap.appendChild(head);
+
+  results.slice(0,3).forEach((r, idx)=>{
+    const dkm = (r.totalM/1000).toFixed(2);
+    const card = document.createElement('div');
+    card.style.border='1px dashed #bbb';
+    card.style.padding='8px';
+    card.style.margin='6px 0';
+
+    // 採用POI一覧
+    const items = r.picks.map((p,i)=> `${i+1}. ${p.name} (${p.lat.toFixed(5)},${p.lon.toFixed(5)})`).join('<br>');
+
+    card.innerHTML = `
+      <div style="font-weight:700">#${idx+1} 合計 ${dkm} km</div>
+      <div style="margin-top:4px">${items}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <button class="btn-show-markers">マーカーだけ表示（APIゼロ）</button>
+        <button class="btn-show-line">このルートを表示（実線・ORS）</button>
+      </div>
+    `;
+
+    // ボタン動作
+    card.querySelector('.btn-show-markers').onclick = ()=>{
+      setComboMarkers(start, r.picks, goal);        // 採用POIのみのマーカーに切り替え
+    };
+    card.querySelector('.btn-show-line').onclick = async (ev)=>{
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      const old = btn.textContent;
+      btn.textContent = '生成中...';
+      try{
+        // ORS 実線描画（既存ヘルパ使用）
+        const profile = document.getElementById('profileSelect')?.value || 'cycling-road';
+        const wps = [start, ...r.picks, goal].map(p=>({lat:p.lat, lon:p.lon, name:p.name || 'POI'}));
+        const out = await routeLegStatsForWaypoints(wps, profile);
+        const feature = out?.feature;
+        if (!feature){ alert('ルートを生成できませんでした。'); return; }
+
+        // 線を表示
+        clearRouteLayers();
+        const color = '#00aa88';
+        const layer = L.geoJSON(feature, { style:{ color, weight: 7 } }).addTo(map);
+        routeLayers['combo-total#'+(idx+1)] = layer;
+
+        // マーカーも該当POIだけに切替
+        setComboMarkers(start, r.picks, goal);
+
+        if (layer.getBounds && layer.getBounds().isValid && layer.getBounds().isValid()){
+          map.fitBounds(layer.getBounds().pad(0.1));
+        }
+        setActiveButton(null);
+      }catch(e){
+        console.error(e);
+        const hints = [
+          !ORS_KEY ? 'ORS_KEY が未設定' : null,
+          !(pts && pts.length>=2) ? 'Start/Goal が不正' : null,
+        ].filter(Boolean).join(' / ');
+        alert('実線描画でエラー: ' + (e.message || e) + (hints ? '\nヒント: ' + hints : ''));
+      }finally{
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    };
+
+    wrap.appendChild(card);
+  });
+
+  box.prepend(wrap);
   return results;
 }
 
-/* ===== 任意：ボタンを自動で追加 ===== */
+/* ===== ワンクリック用ボタンをページに追加 ===== */
 (function injectTotalButtons(){
   const host = document.getElementById('comboTop3') || document.body;
   if (!host || document.getElementById('btnTotalStraight')) return;
@@ -1847,6 +1902,7 @@ async function computeAllComboTotals(mode='route', opts={}){
 </script>
 </body>
 </html>
+
 
 
 
