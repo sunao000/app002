@@ -568,7 +568,8 @@ if (algo === 'bruteforce'){
   const tkBF = tStart('探索: 総当たり');  // ← 計測開始（全体）
   try {
     // --- 総当たり（API多め・高精度）---
-    const perGroupLimit = Math.max(1, Math.min(3, Number($('poiLimit').value)||3)); // 各トリガー最大件数
+    //const perGroupLimit = Math.max(1, Math.min(3, Number($('poiLimit').value)||3)); // 各トリガー最大件数
+    const perGroupLimit = Math.max(1, Number($('poiLimit').value) || 5);
     const poiGroups = restGroups.map(g => Array.isArray(g.pois) ? g.pois : []);
     const combos = enumerateCombinations(poiGroups, perGroupLimit, 60);             // 総当たり上限60通り
     if (!combos.length){
@@ -2601,4 +2602,5 @@ async function showLinearComboRoute(row){
 </script>
 </body>
 </html>
+
 
