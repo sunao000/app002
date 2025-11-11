@@ -282,6 +282,8 @@ const ORS_ROOT = 'https://api.openrouteservice.org';
 /* ====== ヘルパ ====== */
 let map, pts=[], markerLayer, routeLayers={}, lastDirTs=0;
 let routeData = { shortest:null, fastest:null, slope:null, arterial:null };
+let OVERPASS_CALL_TOTAL = 0;  // Overpass API の累計呼び出し回数
+
 
 /* ===== 超シンプル・プロファイラ ===== */
 const PERF = { on:true, rows:[], max:200 };
@@ -865,6 +867,8 @@ tEnd(tkRest, `hits=${rests.length}`);
 if ($('poiToggle').checked) {
   const baseRadius = Number($('poiRadius').value) || 50000;
   const limit = Math.max(1, Number($('poiLimit').value) || 5);
+  // ★ ここで今回の休憩場所検索開始時点のカウントを記録
+  const overpassBefore = OVERPASS_CALL_TOTAL;
 
   for (let idx = 0; idx < rests.length; idx++) {
     const r = rests[idx];
@@ -898,6 +902,9 @@ tEnd(tkPOI, `found=${pois.length}`);
   // ▼ 追加：パネルへ反映
   ensureProjections();
   updateRestPoiPanel();
+  // ★ ここで今回使った回数と累計を「最後の行」として出す
+  const usedThisTime = OVERPASS_CALL_TOTAL - overpassBefore;
+  logRest(`--- Overpass API 呼び出し: 今回 ${usedThisTime} 回 / 累計 ${OVERPASS_CALL_TOTAL} 回 ---`);
   
 }
 
@@ -1290,6 +1297,7 @@ async function overpassQuery(query) {
   for (const ep of endpoints) {
     try {
       API_USED.overpassTotal++;
+      OVERPASS_CALL_TOTAL++;
       const r = await fetch(ep, {
         method: 'POST',
         headers: {
@@ -2602,5 +2610,6 @@ async function showLinearComboRoute(row){
 </script>
 </body>
 </html>
+
 
 
