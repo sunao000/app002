@@ -204,6 +204,9 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
       <button id="btnAlgoCompare" type="button">
         総当たり と ビームサーチ を比較（同じPOIセット）
       </button>
+      <button id="dbgAlgoCsv" type="button" style="margin-left:8px;">
+        Excel用CSVダウンロード
+      </button>
       <small style="color:#666;display:block;margin-top:4px">
         ※先に「休憩場所検索」で 休憩トリガー＋POI を作ってから実行してください。
       </small>
@@ -415,6 +418,11 @@ window.addEventListener('DOMContentLoaded',()=>{
     const btnCmp = $('btnAlgoCompare');
   if (btnCmp) {
     btnCmp.onclick = runAlgoCompareDebug;
+  }
+  // ▼ Excel用CSVダウンロードボタンの紐付け
+  const csvBtn = $('dbgAlgoCsv');
+  if (csvBtn) {
+    csvBtn.onclick = downloadAlgoCompareCsv;
   }
   /* ===== 評価ウェイト UI 初期化 ===== */
   function reflectWeightsToInputs(){
@@ -2958,4 +2966,5 @@ function downloadAlgoCompareCsv(){
 </script>
 </body>
 </html>
+
 
