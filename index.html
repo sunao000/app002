@@ -1702,6 +1702,13 @@ header.innerHTML = `
       } else {
   // 候補が一件も無いのか、単にその組み合わせで未採用なのかを判定
   const hasAny = Array.isArray(g?.pois) && g.pois.length > 0;
+
+  // ★デバッグログ追加
+  console.log('[showTop3Combos] trigger', i+1,
+              'pois=', g?.pois?.length || 0,
+              'chosen=', chosen,
+              'label=', hasAny ? '未採用' : '候補なし');
+
   row.textContent = hasAny ? '・（未採用）' : '・（候補なし）';
   row.style.color = '#777';
 }
@@ -2610,6 +2617,7 @@ async function showLinearComboRoute(row){
 </script>
 </body>
 </html>
+
 
 
 
