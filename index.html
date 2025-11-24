@@ -289,7 +289,25 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 <div class="section">
   <h3>最適な休憩組み合わせ（上位3件）</h3>
   <div id="comboTop3" style="font-size:0.9rem;"></div>
+
+  <!-- ▼ ここから追加：総当たりの全組み合わせ表示＋CSVボタン ▼ -->
+  <details style="margin-top:8px">
+    <summary>総当たり（bruteforce）の全組み合わせ一覧</summary>
+    <div style="margin:6px 0;">
+      <button id="btnDownloadBruteforceCsv" type="button" disabled>
+        Excel 用 CSV ダウンロード（総当たり）
+      </button>
+    </div>
+    <pre id="bruteforceAllList"
+         style="font-family:ui-monospace,monospace;font-size:12px;
+                white-space:pre-wrap;border:1px solid #eee;
+                padding:6px;max-height:260px;overflow:auto;">
+未計算
+    </pre>
+  </details>
+  <!-- ▲ 追加ここまで ▲ -->
 </div>
+
 
 
 <!-- グラフ描画＆ダウンロード -->
@@ -312,6 +330,7 @@ let routeData = { shortest:null, fastest:null, slope:null, arterial:null };
 let OVERPASS_CALL_TOTAL = 0;  // Overpass API の累計呼び出し回数
 
   window.__algoCompareRows = [];
+  window.__bruteforceAllResults = [];   // ★ 総当たりの全結果を保存する配列
 
 /* ===== 超シンプル・プロファイラ ===== */
 const PERF = { on:true, rows:[], max:200 };
@@ -424,6 +443,12 @@ window.addEventListener('DOMContentLoaded',()=>{
   if (csvBtn) {
     csvBtn.onclick = downloadAlgoCompareCsv;
   }
+    // ▼ 総当たり 全組み合わせ CSV ボタンの紐付け
+  const bfCsvBtn = $('btnDownloadBruteforceCsv');
+  if (bfCsvBtn) {
+    bfCsvBtn.onclick = downloadBruteforceCsv;
+  }
+
   /* ===== 評価ウェイト UI 初期化 ===== */
   function reflectWeightsToInputs(){
     const WA = document.getElementById('wAlign');
@@ -651,6 +676,9 @@ if (algo === 'bruteforce'){
     // スコア昇順に上位3件
     results.sort((a,b)=>a.score-b.score);
     showTop3Combos(results.slice(0,3));
+    // ★ 追加：総当たりの全組み合わせを保存＆一覧表示
+    window.__bruteforceAllResults = results;
+    renderBruteforceAllResults(results);
   } finally {
     const R = restGroups?.length || 0;
     const totalCand = (restGroups||[]).reduce((s,g)=>s+(g?.pois?.length||0),0);
@@ -2962,9 +2990,104 @@ function downloadAlgoCompareCsv(){
   a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 500);
 }
+function renderBruteforceAllResults(results){
+  const box = $('bruteforceAllList');
+  const btn = $('btnDownloadBruteforceCsv');
+  if (!box) return;
+
+  if (!results || !results.length){
+    box.textContent = '（総当たりの結果がありません）';
+    if (btn) btn.disabled = true;
+    return;
+  }
+
+  if (btn) btn.disabled = false;
+
+  const lines = [];
+  results.forEach((r, idx) => {
+    const rank = idx + 1;
+    const sig = {
+      dist: stdDev(r.stats?.dist || []),
+      time: stdDev(r.stats?.time || []),
+      energy: stdDev(r.stats?.energy || [])
+    };
+    const names = (r.picks || r.picksByTrigger || [])
+      .filter(Boolean)
+      .map(p => p.name || 'POI')
+      .join(' -> ');
+
+    lines.push(
+      `#${rank} score=${(r.score ?? 0).toFixed(4)} raw=${(r.rawScore ?? r.score ?? 0).toFixed(4)} ` +
+      `σd=${sig.dist.toFixed(2)}km σt=${sig.time.toFixed(2)}min σE=${sig.energy.toFixed(1)}kJ`
+    );
+    lines.push(
+      `   picks: ${names}`
+    );
+  });
+
+  box.textContent = lines.join('\n');
+}
+function downloadBruteforceCsv(){
+  const rows = window.__bruteforceAllResults || [];
+  if (!rows.length){
+    alert('総当たりがまだ実行されていません');
+    return;
+  }
+
+  const esc = s => String(s).replace(/"/g,'""');
+
+  const header = [
+    'rank',
+    'score',
+    'rawScore',
+    'sigmaDist_km',
+    'sigmaTime_min',
+    'sigmaEnergy_kJ',
+    'poi_names'
+  ];
+
+  const lines = [];
+  lines.push(header.join(','));
+
+  rows.forEach((r, idx)=>{
+    const rank = idx + 1;
+    const sig = {
+      dist: stdDev(r.stats?.dist || []),
+      time: stdDev(r.stats?.time || []),
+      energy: stdDev(r.stats?.energy || [])
+    };
+    const names = (r.picks || r.picksByTrigger || [])
+      .filter(Boolean)
+      .map(p => p.name || 'POI')
+      .join(' -> ');
+
+    lines.push([
+      rank,
+      r.score ?? '',
+      r.rawScore ?? '',
+      sig.dist.toFixed(4),
+      sig.time.toFixed(4),
+      sig.energy.toFixed(4),
+      `"${esc(names)}"`
+    ].join(','));
+  });
+
+  // Excel 用に BOM 付き UTF-8 + CRLF にする
+  const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+  const csv = lines.join('\r\n');
+  const blob = new Blob([bom, csv], { type:'text/csv;charset=utf-8' });
+
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bruteforce_combinations.csv';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 500);
+}
 
 </script>
 </body>
 </html>
+
 
 
