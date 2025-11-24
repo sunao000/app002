@@ -280,16 +280,7 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 </div>
 
 <!-- アルゴリズム比較デバッグ用のバーのどこかに追加 -->
-<div id="algoDebugBar">
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <button id="dbgRunGreedy">デバッグ: 等間隔貪欲</button>
-    <button id="dbgRunBeam">デバッグ: ビームサーチ</button>
-    <button id="dbgClear">クリア</button>
-    <!-- ▼▼ 追加：Excel用CSVダウンロードボタン ▼▼ -->
-    <button id="dbgAlgoCsv">Excel用CSVダウンロード</button>
-  </div>
-  <pre id="dbgAlgoLog" ...></pre>
-</div>  
+
   
 <!-- 組み合わせ評価：上位3件 -->
 <div class="section">
@@ -404,7 +395,7 @@ function updateAlgoPerfSummary(algoCode){
 
 
 
-// ▼▼ ここに追加：休憩リスト用変数 ▼▼
+// ▼▼ 休憩リスト用変数 ▼▼
 let restList = []; // 休憩地点を保存
 let restGroups = []; 
 
@@ -2690,6 +2681,10 @@ function injectAlgoDebugButtons(cumTotals){
     logEl.textContent='';
     document.getElementById('comboTop3').innerHTML='';
   };
+  const csvBtn = document.getElementById('dbgAlgoCsv');
+  if (csvBtn) {
+    csvBtn.onclick = downloadAlgoCompareCsv;
+  }
 }
 
 // 幹線度（大きいほど“幹線っぽい”）
@@ -2904,7 +2899,63 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
   });
 }
 
-  
+function downloadAlgoCompareCsv(){
+  const rows = window.__algoCompareRows || [];
+  if (!rows.length){
+    alert('先にアルゴリズム比較デバッグを実行してください');
+    return;
+  }
+
+  const esc = s => String(s).replace(/"/g,'""');
+
+  const header = [
+    'algo',
+    'label',
+    'rank',
+    'score',
+    'rawScore',
+    'sigmaDist_km',
+    'sigmaTime_min',
+    'sigmaEnergy_kJ',
+    'time_ms',
+    'ors_calls',
+    'overpass_calls',
+    'poi_names'
+  ];
+
+  const lines = [];
+  lines.push(header.join(','));
+
+  rows.forEach(r=>{
+    lines.push([
+      r.algo,
+      `"${esc(r.label ?? '')}"`,
+      r.rank ?? '',
+      r.score ?? '',
+      r.rawScore ?? '',
+      r.sigmaDist ?? '',
+      r.sigmaTime ?? '',
+      r.sigmaEnergy ?? '',
+      r.timeMs ?? '',
+      r.orsCalls ?? '',
+      r.overpassCalls ?? '',
+      `"${esc(r.poiNames ?? '')}"`
+    ].join(','));
+  });
+
+  const bom = new Uint8Array([0xEF,0xBB,0xBF]);
+  const csv = lines.join('\r\n');
+  const blob = new Blob([bom, csv], { type:'text/csv;charset=utf-8' });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'algo_compare_result.csv';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 500);
+}
+
 </script>
 </body>
 </html>
+
