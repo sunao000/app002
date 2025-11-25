@@ -3022,6 +3022,8 @@ function renderBruteforceAllResults(results){
 
   if (btn) btn.disabled = false;
 
+  window.__bruteforceAllResults = results;
+  
   const lines = [];
   results.forEach((r, idx) => {
     const rank = idx + 1;
@@ -3107,6 +3109,7 @@ function downloadBruteforceCsv(){
 </script>
 </body>
 </html>
+
 
 
 
