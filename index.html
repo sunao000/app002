@@ -1821,12 +1821,15 @@ header.innerHTML = `
           : (r.picks || []);
         setComboMarkers(start, picksArray, goal);
 
-        if (layer.getBounds && layer.getBounds().isValid && layer.getBounds().isValid()) {
-          map.fitBounds(layer.getBounds().pad(0.1));
-        } else {
-          const fallback = (r.picks && r.picks[0]) || pts[0];
-          if (fallback) map.flyTo([fallback.lat, fallback.lon], 14);
-        }
+        // （showTop3Combos 内の一部）
+const bounds = layer.getBounds?.();
+if (bounds && bounds.isValid && bounds.isValid()) {
+  map.fitBounds(bounds.pad(0.1));
+} else {
+  const fallback = (r.picks && r.picks[0]) || pts[0];
+  if (fallback) map.flyTo([fallback.lat, fallback.lon], 14);
+}
+
         setActiveButton(null);
       } catch (e){
   console.error(e);
@@ -2827,38 +2830,54 @@ function dpSearch(restGroups, cumTotals){
   return { picksByTrigger: picks, stats: ev.stats, score: ev.score };
 }
 
-// 上位3件カードの「ルート表示」から呼ばれる：実際の経路をORSで引いて地図に描画
+// 上位3件カードの「この組み合わせでルート表示」から呼ばれる
 async function showLinearComboRoute(row){
-  if(!row || !Array.isArray(row.picks)) throw new Error('不正な行データ');
-  const {start, goal} = getStartGoalPoints();
+  if (!row || !Array.isArray(row.picks)) {
+    throw new Error('不正な行データ');
+  }
+
+  const { start, goal } = getStartGoalPoints();
   const profile = document.getElementById('profileSelect')?.value || 'cycling-road';
 
   // 経由順は「トリガー順の picks をそのまま」
-  const wps = [start, ...row.picks, goal].map(p=>({
-    lat: p.lat, lon: p.lon, name: p.name || 'POI'
+  const wps = [start, ...row.picks, goal].map(p => ({
+    lat: p.lat,
+    lon: p.lon,
+    name: p.name || 'POI'
   }));
 
   // ORSでルート生成（既存ヘルパを再利用）
   const out = await routeLegStatsForWaypoints(wps, profile);
   const feature = out?.feature;
-  if(!feature) throw new Error('ORS ルート生成に失敗しました');
+  if (!feature) {
+    throw new Error('ORS ルート生成に失敗しました');
+  }
 
   // 既存レイヤをクリアして描画
   clearRouteLayers();
-  const layer = L.geoJSON(feature, { style:{ color:'#0096ff', weight:7 } }).addTo(map);
+  const layer = L.geoJSON(feature, {
+    style: { color: '#0096ff', weight: 7 }
+  }).addTo(map);
   routeLayers['linearTopRoute'] = layer;
 
   // 採用POI＆Start/Goalのマーカーを設定（既存関数）
   setComboMarkers(start, row.picks, goal);
 
-  // 収まり調整
-  if (layer.getBounds && layer.getBounds().isValid && layer.getBounds().isValid()){
-    map.fitBounds(layer.getBounds().pad(0.1));
+  // 収まり調整（getBounds は一度だけ呼んでから isValid() をチェック）
+  const bounds = layer.getBounds?.();
+  if (bounds && bounds.isValid && bounds.isValid()) {
+    map.fitBounds(bounds.pad(0.1));
+  } else {
+    const fallback = row.picks[0] || start;
+    if (fallback) {
+      map.flyTo([fallback.lat, fallback.lon], 14);
+    }
   }
 
-  // ルート切替ボタンの「選択状態」をクリア
+  // ルート種別ボタンの「active」を全部外しておく（任意）
   setActiveButton(null);
 }
+
 
 function stdDev(arr){
   if (!arr || !arr.length) return 0;
@@ -3088,6 +3107,7 @@ function downloadBruteforceCsv(){
 </script>
 </body>
 </html>
+
 
 
 
