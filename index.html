@@ -2906,22 +2906,21 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
       .join(' -> ');
 
     window.__algoCompareRows.push({
-      algo: algoCode,          // 'beam3' / 'bruteforce' 等
-      label,                   // 日本語ラベル
-      rank,                    // 1,2,3...
-      score:  r.score ?? null, // 最終スコア（小さいほど良い）
-      rawScore: r.rawScore ?? null, // 総当たり用（あれば）
-      sigmaDist: sig.dist,
-      sigmaTime: sig.time,
-      sigmaEnergy: sig.energy,
-      timeMs: elapsedMs ?? null,
-      orsCalls: orsCalls ?? null,
+      algo: algoCode,               // 'beam3' / 'bruteforce' 等
+      label,                        // 日本語ラベル
+      rank,                         // 1,2,3...
+      score:      r.score ?? null,  // 最終スコア（小さいほど良い）
+      rawScore:   r.rawScore ?? null, // 総当たり用（あれば）
+      sigmaDist:  sig.dist,
+      sigmaTime:  sig.time,
+      sigmaEnergy:sig.energy,
+      timeMs:     elapsedMs ?? null,
+      orsCalls:   orsCalls ?? null,
       overpassCalls: overpassCalls ?? null,
-      poiNames                      // 採用POI名（文字列１本）
+      poiNames
     });
   });
 }
-
   function showAlgoListInPanel(panel, list, tag){
   if (!list || !list.length){
     panel.textContent += `（${tag}）結果なし\n`;
@@ -2957,7 +2956,7 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
 function downloadAlgoCompareCsv(){
   const rows = window.__algoCompareRows || [];
   if (!rows.length){
-    alert('先にアルゴリズム比較デバッグを実行してください');
+    alert('先に「アルゴリズム比較デバッグ」を実行してください');
     return;
   }
 
@@ -2983,7 +2982,7 @@ function downloadAlgoCompareCsv(){
 
   rows.forEach(r=>{
     lines.push([
-      r.algo,
+      r.algo ?? '',
       `"${esc(r.label ?? '')}"`,
       r.rank ?? '',
       r.score ?? '',
@@ -2998,6 +2997,7 @@ function downloadAlgoCompareCsv(){
     ].join(','));
   });
 
+  // UTF-8 BOM + CRLF で Excel 対応
   const bom = new Uint8Array([0xEF,0xBB,0xBF]);
   const csv = lines.join('\r\n');
   const blob = new Blob([bom, csv], { type:'text/csv;charset=utf-8' });
@@ -3005,10 +3005,11 @@ function downloadAlgoCompareCsv(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'algo_compare_result.csv';
+  a.download = 'algo_compare_debug.csv';
   a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 500);
 }
+
 function renderBruteforceAllResults(results){
   const box = $('bruteforceAllList');
   const btn = $('btnDownloadBruteforceCsv');
@@ -3109,8 +3110,3 @@ function downloadBruteforceCsv(){
 </script>
 </body>
 </html>
-
-
-
-
-
