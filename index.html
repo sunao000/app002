@@ -3071,13 +3071,14 @@ function downloadBruteforceCsv(){
   const lines = [];
   lines.push(header.join(','));
 
-  rows.forEach((r, idx)=>{
+  rows.forEach((r, idx) => {
     const rank = idx + 1;
     const sig = {
       dist: stdDev(r.stats?.dist || []),
       time: stdDev(r.stats?.time || []),
       energy: stdDev(r.stats?.energy || [])
     };
+
     const names = (r.picks || r.picksByTrigger || [])
       .filter(Boolean)
       .map(p => p.name || 'POI')
@@ -3087,26 +3088,28 @@ function downloadBruteforceCsv(){
       rank,
       r.score ?? '',
       r.rawScore ?? '',
-      sig.dist.toFixed(4),
-      sig.time.toFixed(4),
-      sig.energy.toFixed(4),
+      sig.dist ?? '',
+      sig.time ?? '',
+      sig.energy ?? '',
       `"${esc(names)}"`
     ].join(','));
   });
 
-  // Excel 用に BOM 付き UTF-8 + CRLF にする
-  const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
-  const csv = lines.join('\r\n');
+  // UTF-8 BOM + CRLF で Excel 向け
+  const bom  = new Uint8Array([0xEF,0xBB,0xBF]);
+  const csv  = lines.join('\r\n');
   const blob = new Blob([bom, csv], { type:'text/csv;charset=utf-8' });
 
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
   a.href = url;
-  a.download = 'bruteforce_combinations.csv';
+  a.download = 'bruteforce_all_results.csv';
   a.click();
-  setTimeout(()=>URL.revokeObjectURL(url), 500);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
 }
+
 
 </script>
 </body>
 </html>
+
