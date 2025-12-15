@@ -3411,8 +3411,15 @@ async function runViterbiTopK_API(start, goal, restGroups, profile, opt = {}) {
   const T = Array.isArray(restGroups) ? restGroups.length : 0;
   if (T <= 0) return [];
 
-  const beamWidth = Math.max(1, Number(opt.beamWidth) || 10); // 各ステップで残す本数
-  const topK      = Math.max(1, Number(opt.topK) || 50);      // 最終候補数
+  // const beamWidth = Math.max(1, Number(opt.beamWidth) || 10); // 各ステップで残す本数
+  // const topK      = Math.max(1, Number(opt.topK) || 50);      // 最終候補数
+  const ap = autoBeamParams(restGroups, opt);
+const beamWidth = ap.beamWidth;
+const topK      = ap.topK;
+
+// デバッグしたいなら（任意）
+console.log('[autoBeamParams]', ap);
+
 
   // ideal 1 leg（既存と同じ）
   const cumTotals = window.__cumTotals || {};
@@ -3670,7 +3677,53 @@ function attachBfRank(resultList, bfRankMap){
   return resultList;
 }
 
+function autoBeamParams(restGroups, opt = {}){
+  const T = Array.isArray(restGroups) ? restGroups.length : 0;
+
+  // 各トリガー候補数（配列の配列を想定）
+  const Klist = (Array.isArray(restGroups) ? restGroups : []).map(g => Array.isArray(g) ? g.length : 0);
+  const Kmin = Klist.length ? Math.min(...Klist) : 0;
+  const Kavg = Klist.length ? (Klist.reduce((a,b)=>a+b,0) / Klist.length) : 0;
+
+  // --- ベース：Tが増えるほど少しだけ広げる（爆発させない） ---
+  let beamWidth =
+      (T <= 1) ? 12 :
+      (T === 2) ? 18 :
+      (T === 3) ? 24 :
+      (T === 4) ? 30 :
+      (T === 5) ? 36 :
+                 40; // 6以上は上限
+
+  // 候補が少ないならビームを広げても意味が薄いので抑える
+  // 逆に候補が多いときは少し増やす
+  if (Kavg <= 3) beamWidth = Math.min(beamWidth, 18);
+  if (Kavg >= 10) beamWidth = Math.min(60, Math.floor(beamWidth * 1.25));
+
+  // beamWidth は「各段で残す本数」なので、各トリガー候補より大きくしてもムダになりがち
+  // 目安として Kmin*3 くらいを上限にしておく（Kminが小さいときの無駄防止）
+  if (Kmin > 0) beamWidth = Math.min(beamWidth, Kmin * 3);
+
+  // --- topK：最終候補数。Tが増えるほど少し増やすが上限付き ---
+  let topK =
+      (T <= 1) ? 30 :
+      (T === 2) ? 60 :
+      (T === 3) ? 90 :
+      (T === 4) ? 120 :
+      (T === 5) ? 150 :
+                 180; // 6以上は上限
+
+  // rerank をするなら topK は大きすぎると ORS 追加呼び出しが増えがち → 上限
+  topK = Math.min(topK, 200);
+
+  // --- ユーザー指定があれば優先（明示指定は最強） ---
+  if (opt.beamWidth != null) beamWidth = Math.max(1, Number(opt.beamWidth) || 1);
+  if (opt.topK != null)      topK      = Math.max(1, Number(opt.topK) || 1);
+
+  return { beamWidth, topK, T, Kmin, Kavg };
+}
+  
 </script>
 </body>
 </html>
+
 
