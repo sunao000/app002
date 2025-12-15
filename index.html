@@ -2726,16 +2726,10 @@ async function runAlgoCompareDebug(){
   const panel = $('algoComparePanel');
   panel.textContent = '';
 
-  // 関数全体の時間計測開始
   const tAll0 = performance.now();
-
-  // CSV 用バッファ初期化
   window.__algoCompareRows = [];
 
   try {
-    // -----------------------------
-    // 前提チェック
-    // -----------------------------
     if (!routeData || !routeData.fastest) {
       panel.textContent = '先に「休憩場所検索」でルート＋POIを生成してください。';
       return;
@@ -2745,230 +2739,203 @@ async function runAlgoCompareDebug(){
       return;
     }
 
-    // 射影などの前処理
     ensureProjections();
     const cumTotals = window.__cumTotals;
 
-    // Start / Goal / profile
     const start = pts.find(p => p.type === 'start') || pts[0];
     const goal  = pts.find(p => p.type === 'goal')  || pts[pts.length - 1];
     const profile = 'cycling-road';
 
     panel.textContent += '====== アルゴリズム比較デバッグ ======\n\n';
 
+    // bf_rank 用
+    let bfList = [];
+    let bfRankMap = null;
+
     // ----------------------------------------------------------
     // 1）ビームサーチ（ゼロAPI）
     // ----------------------------------------------------------
     panel.textContent += '--- ビームサーチ（幅3・ゼロAPI） ---\n';
 
-    const orsBeforeBeam = API_USED.orsTotal;
-    const ovpBeforeBeam = API_USED.overpassTotal;
+    {
+      const orsBefore = API_USED.orsTotal;
+      const ovpBefore = API_USED.overpassTotal;
 
-    const tBeam0 = performance.now();
-    const beamList = runBeamSearchOnce(restGroups, cumTotals);  // 同期想定
-    const tBeam1 = performance.now();
-    const beamMs = tBeam1 - tBeam0;
+      const t0 = performance.now();
+      const beamList = runBeamSearchOnce(restGroups, cumTotals);
+      const t1 = performance.now();
 
-    const beamOrs = API_USED.orsTotal      - orsBeforeBeam;
-    const beamOv  = API_USED.overpassTotal - ovpBeforeBeam;
+      const ms = t1 - t0;
+      const ors = API_USED.orsTotal - orsBefore;
+      const ov  = API_USED.overpassTotal - ovpBefore;
 
-    panel.textContent += `処理時間: ${beamMs.toFixed(1)} ms\n`;
-    panel.textContent += `ORS呼び出し: ${beamOrs} 回\n`;
-    panel.textContent += `Overpass呼び出し: ${beamOv} 回\n\n`;
+      panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+      panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+      panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
-    // 上位3件をUIに表示
-    showAlgoListInPanel(panel, beamList, 'beam3');
-
-    // CSV（上位3件のみ）
-    pushAlgoResultsForCsv(
-      'beam3',
-      'ビームサーチ（幅3）',
-      beamList.slice(0, 3),
-      beamMs,
-      beamOrs,
-      beamOv
-    );
+      // ★bfRankMapはまだ無いのでそのまま表示/CSV
+      showAlgoListInPanel(panel, beamList, 'beam3');
+      pushAlgoResultsForCsv('beam3','ビームサーチ（幅3）',beamList.slice(0,3),ms,ors,ov);
+    }
 
     // ----------------------------------------------------------
-    // 2）総当たり（API多め・高精度）
+    // 2）総当たり（API多め・高精度） => bfRankMap を作る
     // ----------------------------------------------------------
     panel.textContent += '\n--- 総当たり（API多め・高精度） ---\n';
 
-    const orsBeforeBF = API_USED.orsTotal;
-    const ovpBeforeBF = API_USED.overpassTotal;
+    {
+      const orsBefore = API_USED.orsTotal;
+      const ovpBefore = API_USED.overpassTotal;
 
-    const tBF0 = performance.now();
-    const bfList = await runBruteforceOnce(start, goal, restGroups, profile);
-    const tBF1 = performance.now();
-    const bfMs = tBF1 - tBF0;
+      const t0 = performance.now();
+      bfList = await runBruteforceOnce(start, goal, restGroups, profile);
+      const t1 = performance.now();
 
-    const bfOrs = API_USED.orsTotal      - orsBeforeBF;
-    const bfOv  = API_USED.overpassTotal - ovpBeforeBF;
+      const ms = t1 - t0;
+      const ors = API_USED.orsTotal - orsBefore;
+      const ov  = API_USED.overpassTotal - ovpBefore;
 
-    panel.textContent += `処理時間: ${bfMs.toFixed(1)} ms\n`;
-    panel.textContent += `ORS呼び出し: ${bfOrs} 回\n`;
-    panel.textContent += `Overpass呼び出し: ${bfOv} 回\n`;
-    panel.textContent += `組合せ数: ${bfList.length} 件\n\n`;
+      panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+      panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+      panel.textContent += `Overpass呼び出し: ${ov} 回\n`;
+      panel.textContent += `組合せ数: ${bfList.length} 件\n\n`;
 
-    // 上位3件をUIに表示
-    showAlgoListInPanel(panel, bfList, 'bruteforce');
+      // ★bfRankMap 生成
+      bfRankMap = buildBfRankMap(bfList);
 
-    // CSV（総当たりは全件）
-    pushAlgoResultsForCsv(
-      'bruteforce',
-      '総当たり',
-      bfList,
-      bfMs,
-      bfOrs,
-      bfOv
-    );
+      // 総当たり自身も bfRank=そのまま になるように付与（表示統一）
+      attachBfRank(bfList, bfRankMap);
+
+      showAlgoListInPanel(panel, bfList, 'bruteforce');
+      pushAlgoResultsForCsv('bruteforce','総当たり',bfList,ms,ors,ov);
+    }
+
+    // ----------------------------------------------------------
+    // 1）のビームに bf_rank を付け直して再掲したい場合はここで可能
+    // （ここでは省略：必要なら「bf_rank 付与版を再表示」も入れられる）
+    // ----------------------------------------------------------
 
     // ----------------------------------------------------------
     // 3）直線距離（全組合せ・ゼロAPI）
     // ----------------------------------------------------------
     panel.textContent += '\n--- 直線距離（全組み合わせ・ゼロAPI） ---\n';
-
     try {
-      const orsBeforeLin = API_USED.orsTotal;
-      const ovpBeforeLin = API_USED.overpassTotal;
+      const orsBefore = API_USED.orsTotal;
+      const ovpBefore = API_USED.overpassTotal;
 
-      const tLin0 = performance.now();
-
-      // 各トリガーごとに「上位POI 5件まで」の配列を作成
+      const t0 = performance.now();
       const groups = topPoisPerTriggerForLinear(5);
 
       if (!groups || !groups.length) {
         panel.textContent += '(候補なし)\n';
       } else {
-        // 全組合せの直線距離などをまとめた rows を構築
         const linearRows = buildLinearAlgoRows(start, goal, groups);
+        const t1 = performance.now();
 
-        const tLin1 = performance.now();
-        const linMs = tLin1 - tLin0;
+        const ms = t1 - t0;
+        const ors = API_USED.orsTotal - orsBefore;
+        const ov  = API_USED.overpassTotal - ovpBefore;
 
-        const linOrs = API_USED.orsTotal      - orsBeforeLin;
-        const linOv  = API_USED.overpassTotal - ovpBeforeLin;
-
-        // 後で別処理で使いたい場合に保持
         window.__linearResults = linearRows;
 
+        // ★bf_rank 付与
+        attachBfRank(linearRows, bfRankMap);
+
         panel.textContent += `組合せ数: ${linearRows.length} 件\n`;
-        panel.textContent += `処理時間: ${linMs.toFixed(1)} ms\n`;
-        panel.textContent += `ORS呼び出し: ${linOrs} 回\n`;
-        panel.textContent += `Overpass呼び出し: ${linOv} 回\n\n`;
+        panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+        panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+        panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
-        // UIには上位3件だけ表示
         showAlgoListInPanel(panel, linearRows.slice(0, 3), 'linear');
-
-        // CSVには全組合せを記録
-        pushAlgoResultsForCsv(
-          'linear',
-          '直線距離（全組合せ）',
-          linearRows,
-          linMs,
-          linOrs,
-          linOv
-        );
+        pushAlgoResultsForCsv('linear','直線距離（全組合せ）',linearRows,ms,ors,ov);
       }
-    } catch (errLin) {
-      console.error('[linear] 直線距離計算でエラー', errLin);
-      panel.textContent += '\n[直線距離計算エラー] ' + (errLin.message || errLin) + '\n';
+    } catch (e) {
+      console.error('[linear] error', e);
+      panel.textContent += '\n[直線距離計算エラー] ' + (e.message || e) + '\n';
     }
 
     // ----------------------------------------------------------
     // 4）Viterbi（API利用・DP）
     // ----------------------------------------------------------
     panel.textContent += '\n--- Viterbi（API利用・DP） ---\n';
-
     try {
-      const orsBeforeVit = API_USED.orsTotal;
-      const ovpBeforeVit = API_USED.overpassTotal;
+      const orsBefore = API_USED.orsTotal;
+      const ovpBefore = API_USED.overpassTotal;
 
-      // 直線距離と同じく「各トリガー最大5件」の候補を使う
       const vitGroups = topPoisPerTriggerForLinear(5);
 
       if (!vitGroups || !vitGroups.length) {
         panel.textContent += '(候補なし)\n';
       } else {
-        const tVit0 = performance.now();
-        // restGroups ではなく「POI配列の配列」を渡す
+        const t0 = performance.now();
         const vitList = await runViterbiOnce_API(start, goal, vitGroups, profile);
-        const tVit1 = performance.now();
-        const vitMs = tVit1 - tVit0;
+        const t1 = performance.now();
 
-        const vitOrs = API_USED.orsTotal      - orsBeforeVit;
-        const vitOv  = API_USED.overpassTotal - ovpBeforeVit;
+        const ms = t1 - t0;
+        const ors = API_USED.orsTotal - orsBefore;
+        const ov  = API_USED.overpassTotal - ovpBefore;
 
         if (!vitList || !vitList.length) {
           panel.textContent += '(候補なし)\n';
         } else {
-          panel.textContent += `処理時間: ${vitMs.toFixed(1)} ms\n`;
-          panel.textContent += `ORS呼び出し: ${vitOrs} 回\n`;
-          panel.textContent += `Overpass呼び出し: ${vitOv} 回\n\n`;
+          // ★bf_rank 付与
+          attachBfRank(vitList, bfRankMap);
 
-          // UI表示
+          panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+          panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+          panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
+
           showAlgoListInPanel(panel, vitList, 'viterbi');
-
-          // CSV記録
-          pushAlgoResultsForCsv(
-            'viterbi',
-            'Viterbi（API・DP）',
-            vitList,
-            vitMs,
-            vitOrs,
-            vitOv
-          );
+          pushAlgoResultsForCsv('viterbi','Viterbi（API・DP）',vitList,ms,ors,ov);
         }
       }
-    } catch (errVit) {
-      console.error('[viterbi] エラー', errVit);
-      panel.textContent += '\n[viterbi エラー] ' + (errVit.message || errVit) + '\n';
+    } catch (e) {
+      console.error('[viterbi] error', e);
+      panel.textContent += '\n[viterbi エラー] ' + (e.message || e) + '\n';
     }
 
     // ----------------------------------------------------------
-    // 5）対策A：Viterbi TopK → 総量MSEで再ランキング（API）
+    // 5）対策A：Viterbi TopK → 総量MSE再ランキング（API）
     // ----------------------------------------------------------
     panel.textContent += '\n--- 対策A：Viterbi TopK→総量MSE再ランキング（API） ---\n';
-
     try {
-      const orsBeforeA = API_USED.orsTotal;
-      const ovpBeforeA = API_USED.overpassTotal;
+      const orsBefore = API_USED.orsTotal;
+      const ovpBefore = API_USED.overpassTotal;
 
       const groupsA = topPoisPerTriggerForLinear(5);
 
       if (!groupsA || !groupsA.length) {
         panel.textContent += '(候補なし)\n';
       } else {
-        const tA0 = performance.now();
-
-        // ★要: runViterbiTopK_Rerank_API を事前に定義しておくこと
+        const t0 = performance.now();
         const aList = await runViterbiTopK_Rerank_API(start, goal, groupsA, profile, {
-          beamWidth: 10, // まず10
-          topK: 50       // まず50
+          beamWidth: 10,
+          topK: 50
         });
+        const t1 = performance.now();
 
-        const tA1 = performance.now();
-        const aMs = tA1 - tA0;
-
-        const aOrs = API_USED.orsTotal      - orsBeforeA;
-        const aOv  = API_USED.overpassTotal - ovpBeforeA;
+        const ms = t1 - t0;
+        const ors = API_USED.orsTotal - orsBefore;
+        const ov  = API_USED.overpassTotal - ovpBefore;
 
         if (!aList || !aList.length) {
           panel.textContent += '(候補なし)\n';
         } else {
-          panel.textContent += `処理時間: ${aMs.toFixed(1)} ms\n`;
-          panel.textContent += `ORS呼び出し: ${aOrs} 回\n`;
-          panel.textContent += `Overpass呼び出し: ${aOv} 回\n\n`;
+          // ★bf_rank 付与
+          attachBfRank(aList, bfRankMap);
+
+          panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+          panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+          panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
           showAlgoListInPanel(panel, aList, 'viterbi_topk_rerank');
-
           pushAlgoResultsForCsv(
             'viterbi_topk_rerank',
             '対策A：Viterbi TopK→総量MSE再ランキング',
             aList,
-            aMs,
-            aOrs,
-            aOv
+            ms,
+            ors,
+            ov
           );
         }
       }
@@ -2981,44 +2948,35 @@ async function runAlgoCompareDebug(){
     // 6）対策B：Viterbi（L1加法・API）
     // ----------------------------------------------------------
     panel.textContent += '\n--- 対策B：Viterbi（L1加法・API） ---\n';
-
     try {
-      const orsBeforeB = API_USED.orsTotal;
-      const ovpBeforeB = API_USED.overpassTotal;
+      const orsBefore = API_USED.orsTotal;
+      const ovpBefore = API_USED.overpassTotal;
 
       const groupsB = topPoisPerTriggerForLinear(5);
 
       if (!groupsB || !groupsB.length) {
         panel.textContent += '(候補なし)\n';
       } else {
-        const tB0 = performance.now();
-
-        // ★要: runViterbiOnce_API_L1 を事前に定義しておくこと
+        const t0 = performance.now();
         const bList = await runViterbiOnce_API_L1(start, goal, groupsB, profile);
+        const t1 = performance.now();
 
-        const tB1 = performance.now();
-        const bMs = tB1 - tB0;
-
-        const bOrs = API_USED.orsTotal      - orsBeforeB;
-        const bOv  = API_USED.overpassTotal - ovpBeforeB;
+        const ms = t1 - t0;
+        const ors = API_USED.orsTotal - orsBefore;
+        const ov  = API_USED.overpassTotal - ovpBefore;
 
         if (!bList || !bList.length) {
           panel.textContent += '(候補なし)\n';
         } else {
-          panel.textContent += `処理時間: ${bMs.toFixed(1)} ms\n`;
-          panel.textContent += `ORS呼び出し: ${bOrs} 回\n`;
-          panel.textContent += `Overpass呼び出し: ${bOv} 回\n\n`;
+          // ★bf_rank 付与
+          attachBfRank(bList, bfRankMap);
+
+          panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+          panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+          panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
           showAlgoListInPanel(panel, bList, 'viterbi_l1');
-
-          pushAlgoResultsForCsv(
-            'viterbi_l1',
-            '対策B：Viterbi（L1加法）',
-            bList,
-            bMs,
-            bOrs,
-            bOv
-          );
+          pushAlgoResultsForCsv('viterbi_l1','対策B：Viterbi（L1加法）',bList,ms,ors,ov);
         }
       }
     } catch (e) {
@@ -3027,7 +2985,7 @@ async function runAlgoCompareDebug(){
     }
 
     // ----------------------------------------------------------
-    // 関数全体の処理時間
+    // 全体時間
     // ----------------------------------------------------------
     const totalMs = performance.now() - tAll0;
     panel.textContent += `\n====== 全アルゴリズム処理時間: ${totalMs.toFixed(1)} ms ======\n`;
@@ -3143,20 +3101,18 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
   if (!Array.isArray(resultList) || !resultList.length) return;
   if (!Array.isArray(window.__algoCompareRows)) window.__algoCompareRows = [];
 
-  // ★ 共通の「理想1レグ分」を計算（総当たり / Viterbi と同じ定義）
   const cumTotals = window.__cumTotals || {};
-  const totalDkm  = (Number(cumTotals.D) || 0) / 1000; // m → km
-  const totalTmin = (Number(cumTotals.T) || 0) / 60;   // s → min
-  const totalEkJ  = Number(cumTotals.E)  || 0;         // kJ
+  const totalDkm  = (Number(cumTotals.D) || 0) / 1000;
+  const totalTmin = (Number(cumTotals.T) || 0) / 60;
+  const totalEkJ  = Number(cumTotals.E)  || 0;
 
   const T = Array.isArray(window.restGroups) ? window.restGroups.length : 0;
-  const R = T + 1; // レグ数
+  const R = T + 1;
 
   const idealDistPerLeg   = R > 0 ? totalDkm  / R : 0;
   const idealTimePerLeg   = R > 0 ? totalTmin / R : 0;
   const idealEnergyPerLeg = R > 0 ? totalEkJ  / R : 0;
 
-  // --- MSEベースでソート（取れないときだけ元のscore/rawScoreにフォールバック） ---
   resultList.sort((a, b)=>{
     const mseA = (a.stats
       ? routeMseScoreFromStats(a.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
@@ -3165,26 +3121,18 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
       ? routeMseScoreFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
       : NaN);
 
-    const sA = Number.isFinite(mseA)
-      ? mseA
-      : (a.score ?? a.rawScore ?? Infinity);   // 直線距離など
-    const sB = Number.isFinite(mseB)
-      ? mseB
-      : (b.score ?? b.rawScore ?? Infinity);
-
+    const sA = Number.isFinite(mseA) ? mseA : (a.score ?? a.rawScore ?? Infinity);
+    const sB = Number.isFinite(mseB) ? mseB : (b.score ?? b.rawScore ?? Infinity);
     return sA - sB;
   });
 
-  // --- CSVへ格納 ---
   resultList.forEach((r, idx)=>{
     const rank = idx + 1;
 
-    // σ はこれまで通り「参考情報」として残す
     const sigmaDist   = stdDev(r.stats?.dist || []);
     const sigmaTime   = stdDev(r.stats?.time || []);
     const sigmaEnergy = stdDev(r.stats?.energy || []);
 
-    // MSE スコアを計算（無理なら NaN）
     let mseScore = NaN;
     if (r.stats) {
       mseScore = routeMseScoreFromStats(
@@ -3195,8 +3143,6 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
       );
     }
 
-    // MSE が取れるアルゴリズム（総当たり / Viterbi / ビーム）は MSE を採用
-    // 線形距離など stats が足りないものは、既存の score/rawScore をそのまま使う
     const scoreForCsv =
       Number.isFinite(mseScore)
         ? mseScore
@@ -3206,9 +3152,8 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
     if (Array.isArray(poiList[0])) poiList = poiList.flat().filter(Boolean);
 
     const poiNames = poiList.map(p => p.name || 'POI').join(' -> ');
-
     const poiLatLngs = poiList
-      .map(p => `${(p.lat??p.latitude)?.toFixed(6)},${(p.lon??p.lng)?.toFixed(6)}`)
+      .map(p => `${(p.lat??p.latitude)?.toFixed(6)},${(p.lon??p.lng??p.longitude)?.toFixed(6)}`)
       .filter(Boolean)
       .join(' | ');
 
@@ -3216,8 +3161,9 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
       algo: algoCode,
       label,
       rank,
-      score: scoreForCsv,       // ★ ここが「MSEベースのscore」に統一される
-      rawScore: r.rawScore,     // もともと持っているものはそのまま残す（総当たりはMSE）
+      bfRank: (r.bfRank ?? ''),   // ★追加
+      score: scoreForCsv,
+      rawScore: r.rawScore,
       sigmaDist,
       sigmaTime,
       sigmaEnergy,
@@ -3230,7 +3176,7 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
   });
 }
   
-  function showAlgoListInPanel(panel, list, algoCode){
+function showAlgoListInPanel(panel, list, algoCode){
   if (!panel) return;
   if (!Array.isArray(list) || !list.length){
     panel.textContent += '(候補なし)\n';
@@ -3243,11 +3189,9 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
   top.forEach((r, idx)=>{
     const rank = idx + 1;
 
-    // スコア・rawスコア
     const score    = r.score    ?? null;
     const rawScore = r.rawScore ?? null;
 
-    // stats が無くても落ちないようにガード
     const stats   = r.stats || {};
     const distArr = Array.isArray(stats.dist)   ? stats.dist   : [];
     const timeArr = Array.isArray(stats.time)   ? stats.time   : [];
@@ -3257,7 +3201,6 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
     const sigTime = timeArr.length ? stdDev(timeArr) : null;
     const sigEn   = eneArr.length  ? stdDev(eneArr)  : null;
 
-    // POI名
     const picksArr = (r.picks || r.picksByTrigger || []);
     const poiNames = picksArr
       .filter(Boolean)
@@ -3265,18 +3208,19 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
       .join(' -> ');
 
     panel.textContent += `#${rank}  score=${score}\n`;
-    if (rawScore != null) {
-      panel.textContent += `  rawScore=${rawScore}\n`;
+    if (rawScore != null) panel.textContent += `  rawScore=${rawScore}\n`;
+
+    // ★追加：総当たり順位
+    if (r.bfRank != null) {
+      panel.textContent += `  bf_rank=${r.bfRank}\n`;
+    } else {
+      panel.textContent += `  bf_rank=(圏外/不一致)\n`;
     }
-    if (sigDist != null) {
-      panel.textContent += `  σ距離=${sigDist.toFixed(3)}\n`;
-    }
-    if (sigTime != null) {
-      panel.textContent += `  σ時間=${sigTime.toFixed(3)}\n`;
-    }
-    if (sigEn != null) {
-      panel.textContent += `  σエネルギー=${sigEn.toFixed(3)}\n`;
-    }
+
+    if (sigDist != null) panel.textContent += `  σ距離=${sigDist.toFixed(3)}\n`;
+    if (sigTime != null) panel.textContent += `  σ時間=${sigTime.toFixed(3)}\n`;
+    if (sigEn   != null) panel.textContent += `  σエネルギー=${sigEn.toFixed(3)}\n`;
+
     panel.textContent += `  POI: ${poiNames}\n\n`;
   });
 }
@@ -3289,42 +3233,42 @@ function downloadAlgoCompareCsv(){
   }
 
   const header = [
-  'algo',
-  'label',
-  'rank',
-  'score',
-  'rawScore',
-  'sigmaDist_km',
-  'sigmaTime_min',
-  'sigmaEnergy_kJ',
-  'time_ms',
-  'ors_calls',
-  'overpass_calls',
-  'poi_names',
-  'poi_latlngs'
-];
+    'algo',
+    'label',
+    'rank',
+    'bf_rank',          // ★追加
+    'score',
+    'rawScore',
+    'sigmaDist_km',
+    'sigmaTime_min',
+    'sigmaEnergy_kJ',
+    'time_ms',
+    'ors_calls',
+    'overpass_calls',
+    'poi_names',
+    'poi_latlngs'
+  ];
 
-
-const bodyRows = rows.map(r => [
-  r.algo ?? '',
-  `"${csvEscape(r.label ?? '')}"`,
-  r.rank ?? '',
-  r.score ?? '',
-  r.rawScore ?? '',
-  r.sigmaDist ?? '',
-  r.sigmaTime ?? '',
-  r.sigmaEnergy ?? '',
-  r.timeMs ?? '',
-  r.orsCalls ?? '',
-  r.overpassCalls ?? '',
-  `"${csvEscape(r.poiNames ?? '')}"`,
-  `"${csvEscape(r.poiLatLngs ?? '')}"`
-]);
+  const bodyRows = rows.map(r => [
+    r.algo ?? '',
+    `"${csvEscape(r.label ?? '')}"`,
+    r.rank ?? '',
+    r.bfRank ?? '',     // ★追加
+    r.score ?? '',
+    r.rawScore ?? '',
+    r.sigmaDist ?? '',
+    r.sigmaTime ?? '',
+    r.sigmaEnergy ?? '',
+    r.timeMs ?? '',
+    r.orsCalls ?? '',
+    r.overpassCalls ?? '',
+    `"${csvEscape(r.poiNames ?? '')}"`,
+    `"${csvEscape(r.poiLatLngs ?? '')}"`
+  ]);
 
   const blob = buildCsvBlob(header, bodyRows);
   downloadBlob(blob, 'algo_compare_debug.csv');
 }
-
 
 function renderBruteforceAllResults(results){
   const box = $('bruteforceAllList');
@@ -3684,6 +3628,49 @@ async function runViterbiOnce_API_L1(start, goal, restGroups, profile) {
     picksByTrigger: picks
   }];
 }
+
+// -------------------------------
+// bf_rank 付与用：組合せキー生成
+//  - picksByTrigger を前提に「トリガー順」を固定して比較
+//  - POI同一判定は lat/lon を丸めて文字列化（誤差吸収）
+// -------------------------------
+function comboKeyFromPicksByTrigger(picksByTrigger, decimals = 6){
+  const arr = Array.isArray(picksByTrigger) ? picksByTrigger : [];
+  const f = (x)=> Number(x).toFixed(decimals);
+
+  return arr.map(p=>{
+    if(!p) return 'null';
+    const lat = (p.lat ?? p.latitude);
+    const lon = (p.lon ?? p.lng ?? p.longitude);
+    if(!Number.isFinite(lat) || !Number.isFinite(lon)) return 'bad';
+    return `${f(lat)},${f(lon)}`;
+  }).join('||');
+}
+
+// bfList（総当たり結果）から rank マップを作る
+function buildBfRankMap(bfList){
+  const map = new Map();
+  (bfList || []).forEach((r, idx)=>{
+    const key = comboKeyFromPicksByTrigger(r.picksByTrigger || r.picks);
+    // 同一キーが複数出ても「最上位」を採用
+    if(!map.has(key)) map.set(key, idx + 1);
+  });
+  return map;
+}
+
+// 任意アルゴ結果に bfRank を付与（見つからなければ null）
+function attachBfRank(resultList, bfRankMap){
+  if(!bfRankMap || !(bfRankMap instanceof Map)) return resultList;
+  if(!Array.isArray(resultList)) return resultList;
+
+  resultList.forEach(r=>{
+    const key = comboKeyFromPicksByTrigger(r.picksByTrigger || r.picks);
+    r.bfRank = bfRankMap.has(key) ? bfRankMap.get(key) : null;
+  });
+  return resultList;
+}
+
 </script>
 </body>
 </html>
+
