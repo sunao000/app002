@@ -1949,12 +1949,17 @@ if (bounds && bounds.isValid && bounds.isValid()) {
 }
 
 // 1レグのMSE（距離・時間・エネルギー）
-function legMseCost(d, t, e, ideald, idealt, ideale){
-  const dd = d - ideald;
-  const tt = t - idealt;
+// function legMseCost(d, t, e, ideald, idealt, ideale){
+//   const dd = d - ideald;
+//   const tt = t - idealt;
+//   const ee = e - ideale;
+//   return dd*dd + tt*tt + ee*ee;
+// }
+  function legMseCost(d, t, e, ideald, idealt, ideale){
   const ee = e - ideale;
-  return dd*dd + tt*tt + ee*ee;
+  return ee*ee;
 }
+
 
 // stats({dist[], time[], energy[]}) からルート全体のMSEスコアを計算
 function routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg){
@@ -2327,14 +2332,17 @@ try {
   feature = out?.feature || null;
   if (out?.stats) stats = out.stats;
 
-  // ★ここが本命：総当たりと同じ「総量MSE」を最終スコアにする
-  const exactMse = routeMseScoreFromStats(
-    stats,
-    idealDistPerLeg,
-    idealTimePerLeg,
-    idealEnergyPerLeg
-  );
-  if (Number.isFinite(exactMse)) finalScore = exactMse;
+  // // ★ここが本命：総当たりと同じ「総量MSE」を最終スコアにする
+  // const exactMse = routeMseScoreFromStats(
+  //   stats,
+  //   idealDistPerLeg,
+  //   idealTimePerLeg,
+  //   idealEnergyPerLeg
+  // );
+  // if (Number.isFinite(exactMse)) finalScore = exactMse;
+  const exactE = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
+if (Number.isFinite(exactE)) finalScore = exactE;
+
 
 } catch (e) {
   console.warn('[Viterbi] 統計計算用ルート生成に失敗', e);
@@ -2688,17 +2696,22 @@ async function runBruteforceOnce(start, goal, restGroups, profile){
     try {
       const {feature, stats} = await routeLegStatsForWaypoints(wps, profile);
 
-      // ★ 追加：Viterbi と同じ MSE スコアで評価
-      const mseScore = routeMseScoreFromStats(
-        stats,
-        idealDistPerLeg,
-        idealTimePerLeg,
-        idealEnergyPerLeg
-      );
+      // // ★ 追加：Viterbi と同じ MSE スコアで評価
+      // const mseScore = routeMseScoreFromStats(
+      //   stats,
+      //   idealDistPerLeg,
+      //   idealTimePerLeg,
+      //   idealEnergyPerLeg
+      // );
 
-      // ※ ここでは _w による補正はせず、そのままMSEのみで比較する
-      const score    = mseScore;
-      const rawScore = mseScore;
+      // // ※ ここでは _w による補正はせず、そのままMSEのみで比較する
+      // const score    = mseScore;
+      // const rawScore = mseScore;
+
+      const eScore = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
+const score    = eScore;
+const rawScore = eScore;
+
 
       results.push({
         score,           // MSEスコア（小さいほど「理想ペースに近い」）
@@ -3138,12 +3151,19 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
   const idealEnergyPerLeg = R > 0 ? totalEkJ  / R : 0;
 
   resultList.sort((a, b)=>{
-    const mseA = (a.stats
-      ? routeMseScoreFromStats(a.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
+    // const mseA = (a.stats
+    //   ? routeMseScoreFromStats(a.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
+    //   : NaN);
+    // const mseB = (b.stats
+    //   ? routeMseScoreFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
+    //   : NaN);
+        const mseA = (a.stats
+      ? routeEnergyMseFromStats(a.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
       : NaN);
     const mseB = (b.stats
-      ? routeMseScoreFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
+      ? routeEnergyMseFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
       : NaN);
+    
 
     const sA = Number.isFinite(mseA) ? mseA : (a.score ?? a.rawScore ?? Infinity);
     const sB = Number.isFinite(mseB) ? mseB : (b.score ?? b.rawScore ?? Infinity);
@@ -3538,7 +3558,9 @@ async function runViterbiTopK_Rerank_API(start, goal, restGroups, profile, opt =
       const feature = out?.feature;
       const stats   = out?.stats;
 
-      const mseScore = routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg);
+      // const mseScore = routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg);
+      const eScore = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
+
 
       rescored.push({
         score: mseScore,           // ★ 最終評価は総当たりと同じ “総量MSE”
@@ -3782,7 +3804,8 @@ async function runViterbiTopK_Rerank_API_Dedupe(start, goal, restGroups, profile
       const feature = out?.feature;
       const stats   = out?.stats;
 
-      const mseScore = routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg);
+      // const mseScore = routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg);
+      const eScore = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
 
       rescored.push({
         score: mseScore,          // ★最終評価（総当たりと同じ）
@@ -3902,8 +3925,19 @@ async function runViterbiTopK_Rerank_All_API(start, goal, restGroups, profile, o
   return rescored; // ★全件返す
 }
 
+function routeEnergyMseFromStats(stats, idealEnergyPerLeg){
+  const eArr = stats?.energy || [];
+  const n = eArr.length;
+  if (!n) return NaN;
+
+  let sum = 0;
+  for(let i=0;i<n;i++){
+    const de = eArr[i] - idealEnergyPerLeg;
+    sum += de*de;
+  }
+  return sum;
+}
 
 </script>
 </body>
 </html>
-
