@@ -1824,8 +1824,8 @@ const metricValue = (metric === 'time') ? sig.time
 header.innerHTML = `
   <div style="font-weight:700;margin-bottom:4px">
     #${rank}　スコア（${metricLabel}）: ${metricValue.toFixed(3)}
-    ${typeof r.rawScore === 'number'
-      ? `<span style="color:#777">（MSE=${r.score.toFixed(3)}）</span>`
+    ${Number.isFinite(r.score)
+      ? `<span style="color:#777">（MSE=${Number(r.score).toFixed(3)}）</span>`
       : ''
     }
   </div>
@@ -3575,17 +3575,17 @@ async function runViterbiTopK_Rerank_API(start, goal, restGroups, profile, opt =
       const stats   = out?.stats;
 
       // const mseScore = routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg);
-      const eScore = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
+const eScore = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
 
+rescored.push({
+  score: eScore,            // ← これにする
+  rawScore: c.approxScore,
+  feature,
+  stats,
+  picks: c.picks,
+  picksByTrigger: c.picksByTrigger
+});
 
-      rescored.push({
-        score: mseScore,           // ★ 最終評価は総当たりと同じ “総量MSE”
-        rawScore: c.approxScore,   // ★ 近似（Viterbi側の）スコアも残す
-        feature,
-        stats,
-        picks: c.picks,
-        picksByTrigger: c.picksByTrigger
-      });
     }catch(e){
       // 失敗は捨てる
       console.warn('[viterbi_topk_rerank] candidate route fail', e);
@@ -3824,7 +3824,7 @@ async function runViterbiTopK_Rerank_API_Dedupe(start, goal, restGroups, profile
       const eScore = routeEnergyMseFromStats(stats, idealEnergyPerLeg);
 
       rescored.push({
-        score: mseScore,          // ★最終評価（総当たりと同じ）
+        score: eScore,          // ★最終評価（総当たりと同じ）
         rawScore: c.approxScore,  // 近似スコア（参考）
         feature,
         stats,
@@ -4191,6 +4191,7 @@ function updatePoiLegCostsExportButtonState(){
 </script>
 </body>
 </html>
+
 
 
 
