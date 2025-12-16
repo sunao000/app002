@@ -180,6 +180,9 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   </details>
 </div>
 
+<button id="btnExportPoiLegCostsCsv" disabled>POI間コストCSV（距離/時間/エネルギー）</button>
+<span id="poiLegCostsStatus" style="margin-left:8px;color:#555;"></span>
+
 <!-- サマリー -->
 <div id="summary">
   <div id="routeInfo">未計算</div>
@@ -2059,6 +2062,8 @@ function topPoisPerTriggerForLinear(maxPer=5){
   });
 }
 
+
+
 // 2点間の地上距離（m）
 function llDist(a,b){
   return L.latLng(a.lat, a.lon).distanceTo([b.lat, b.lon]);
@@ -3935,7 +3940,224 @@ function routeEnergyMseFromStats(stats, idealEnergyPerLeg){
   return sum;
 }
 
+// 点の正規化（lat/lon取り出し）
+function normPoint(p){
+  if(!p) return null;
+  const lat = Number(p.lat ?? p.latitude ?? p.y);
+  const lon = Number(p.lon ?? p.lng ?? p.longitude ?? p.x);
+  if(!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon, name: p.name || p.label || 'POI', raw: p };
+}
+
+// 各トリガーから上位N件POIを取る（あなたの topPoisPerTriggerForLinear を流用してOK）
+function topPoisPerTriggerForExport(maxPer=5){
+  // restGroups: [{rest, pois:[...]}] 形式でも、あなたの topPoisPerTriggerForLinear は配列を返す想定なので、
+  // ここでは「POI配列の配列」を作る形で合わせます。
+  if(!Array.isArray(window.restGroups) || !window.restGroups.length) throw new Error('休憩トリガーがありません');
+  const out = window.restGroups.map((g,i)=>{
+    const arr = Array.isArray(g?.pois) ? g.pois.slice().filter(Boolean) : [];
+    if(!arr.length) throw new Error(`トリガー#${i+1} に候補POIがありません`);
+
+    // 近い順の簡易ソート（既に distFromTriggerM/_proj.perpM がある想定）
+    const score = p=>{
+      const a = Number(p?.distFromTriggerM) || 0;
+      const b = Number(p?._proj?.perpM) || 0;
+      return a + b;
+    };
+    arr.sort((x,y)=>score(x)-score(y));
+    return arr.slice(0, Math.max(1, Math.min(maxPer, arr.length)));
+  });
+  return out;
+}
+
+// ORS呼び出しを“少し”安全にする：キャッシュ＋並列数制限＋小休止
+async function exportPoiLegCostsCsv(opt={}){
+  const perTrigger = Math.max(1, Number(opt.perTrigger) || 5);
+  const profile = opt.profile || 'cycling-road';
+  const concurrency = Math.max(1, Number(opt.concurrency) || 2); // 2〜3が無難
+  const sleepMs = Math.max(0, Number(opt.sleepMs) || 80);
+
+  const statusEl = document.getElementById('poiLegCostsStatus');
+  const setStatus = (msg)=>{ if(statusEl) statusEl.textContent = msg; };
+
+  // start/goal
+  const start0 = (window.pts || []).find(p=>p.type==='start') || (window.pts||[])[0];
+  const goal0  = (window.pts || []).find(p=>p.type==='goal')  || (window.pts||[]).at(-1);
+  const start = normPoint(start0);
+  const goal  = normPoint(goal0);
+  if(!start || !goal) throw new Error('Start/Goal が未設定です');
+
+  // groups: [[poi...], [poi...], ...]
+  const groupsRaw = topPoisPerTriggerForExport(perTrigger);
+  const T = groupsRaw.length;
+
+  // 正規化（lat/lon必須）
+  const groups = groupsRaw.map((g,gi)=>g.map(normPoint).filter(Boolean));
+  if(groups.some(g=>!g.length)) throw new Error('POIのlat/lonが不正で、候補が空になりました');
+
+  // 出力対象の「隣接レイヤ辺」を列挙
+  // edges: {from, to, meta...}
+  const edges = [];
+
+  // Start -> group0
+  groups[0].forEach((toPoi, j)=>{
+    edges.push({
+      fromType:'start', fromTrig:0, fromIdx:'', fromName:start.name, fromLat:start.lat, fromLon:start.lon,
+      toType:'poi',     toTrig:1,   toIdx:j+1,  toName:toPoi.name, toLat:toPoi.lat, toLon:toPoi.lon,
+      from:start, to:toPoi
+    });
+  });
+
+  // group(t) -> group(t+1)
+  for(let t=0; t<T-1; t++){
+    for(let i=0;i<groups[t].length;i++){
+      for(let j=0;j<groups[t+1].length;j++){
+        const a = groups[t][i];
+        const b = groups[t+1][j];
+        edges.push({
+          fromType:'poi', fromTrig:t+1, fromIdx:i+1, fromName:a.name, fromLat:a.lat, fromLon:a.lon,
+          toType:'poi',   toTrig:t+2,   toIdx:j+1,   toName:b.name, toLat:b.lat, toLon:b.lon,
+          from:a, to:b
+        });
+      }
+    }
+  }
+
+  // last -> Goal
+  groups[T-1].forEach((fromPoi, i)=>{
+    edges.push({
+      fromType:'poi',  fromTrig:T, fromIdx:i+1, fromName:fromPoi.name, fromLat:fromPoi.lat, fromLon:fromPoi.lon,
+      toType:'goal',   toTrig:0,   toIdx:'',    toName:goal.name, toLat:goal.lat, toLon:goal.lon,
+      from:fromPoi, to:goal
+    });
+  });
+
+  // 呼び出し回数の目安（全て成功した場合）
+  // Start->5 = 5, Between=25*(T-1), Last->Goal=5
+  // 合計 = 25*(T-1) + 10 （各トリガー5件のとき）
+  setStatus(`計算対象: ${edges.length} 本（T=${T}, 各${perTrigger}件）`);
+
+  // キャッシュ（同一座標ペアは再計算しない）
+  const cache = new Map();
+  const keyOf = (a,b)=>`${a.lat.toFixed(6)},${a.lon.toFixed(6)}->${b.lat.toFixed(6)},${b.lon.toFixed(6)}|${profile}`;
+
+  // ワーカー（並列制限）
+  let done = 0;
+  const results = new Array(edges.length);
+
+  async function workerLoop(workerId){
+    while(true){
+      // 次のindexを取る（簡易ロック）
+      const idx = nextIndex++;
+      if(idx >= edges.length) return;
+
+      const e = edges[idx];
+      const k = keyOf(e.from, e.to);
+
+      try{
+        let leg = cache.get(k);
+        if(!leg){
+          // ここがORS呼び出し（CORS回避は別途：プロキシ必須）
+          leg = await calcLegCostWithApi(e.from, e.to, profile); // {distKm,timeMin,energyKj,total}
+          cache.set(k, leg);
+          if(sleepMs) await new Promise(r=>setTimeout(r, sleepMs));
+        }
+
+        results[idx] = {
+          ...e,
+          dist_km: leg.distKm,
+          time_min: leg.timeMin,
+          energy_kj: leg.energyKj
+        };
+      }catch(err){
+        results[idx] = {
+          ...e,
+          dist_km: '',
+          time_min: '',
+          energy_kj: '',
+          error: (err?.message || String(err))
+        };
+      }finally{
+        done++;
+        if(done % 10 === 0 || done === edges.length){
+          setStatus(`進捗: ${done}/${edges.length}`);
+        }
+      }
+    }
+  }
+
+  // 実行
+  let nextIndex = 0;
+  setStatus(`実行中... 0/${edges.length}`);
+  const workers = [];
+  for(let w=0; w<concurrency; w++) workers.push(workerLoop(w));
+  await Promise.all(workers);
+  setStatus(`完了: ${done}/${edges.length}`);
+
+  // CSV化
+  const header = [
+    'from_type','from_trigger','from_poi_idx','from_name','from_lat','from_lon',
+    'to_type','to_trigger','to_poi_idx','to_name','to_lat','to_lon',
+    'dist_km','time_min','energy_kj','error'
+  ];
+
+  const body = results.map(r=>[
+    r.fromType,
+    r.fromTrig,
+    r.fromIdx,
+    `"${csvEscape(r.fromName)}"`,
+    r.fromLat,
+    r.fromLon,
+
+    r.toType,
+    r.toTrig,
+    r.toIdx,
+    `"${csvEscape(r.toName)}"`,
+    r.toLat,
+    r.toLon,
+
+    (r.dist_km===''? '' : Number(r.dist_km).toFixed(6)),
+    (r.time_min===''? '' : Number(r.time_min).toFixed(6)),
+    (r.energy_kj===''? '' : Number(r.energy_kj).toFixed(6)),
+    `"${csvEscape(r.error || '')}"`
+  ]);
+
+  const blob = buildCsvBlob(header, body);
+  downloadBlob(blob, `poi_leg_costs_T${T}_K${perTrigger}.csv`);
+}
+
+function bindPoiLegCostsExportButtonOnce(){
+  const btn = document.getElementById('btnExportPoiLegCostsCsv');
+  if(!btn) return;
+  if(btn.__bound) return;
+  btn.__bound = true;
+
+  btn.onclick = async ()=>{
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = 'CSV作成中…';
+    try{
+      await exportPoiLegCostsCsv({
+        perTrigger: 5,
+        profile: 'cycling-road',
+        concurrency: 2,
+        sleepMs: 80
+      });
+    }catch(e){
+      alert('POI間コストCSVの作成に失敗: ' + (e.message || e));
+      console.error(e);
+    }finally{
+      btn.textContent = old;
+      btn.disabled = false;
+    }
+  };
+}
+
+// どこかの初期化で呼ぶ
+// window.addEventListener('DOMContentLoaded', bindPoiLegCostsExportButtonOnce);
+
 </script>
 </body>
 </html>
+
 
