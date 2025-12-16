@@ -2854,45 +2854,52 @@ async function runAlgoCompareDebug(){
       panel.textContent += '\n[直線距離計算エラー] ' + (e.message || e) + '\n';
     }
 
-    // ----------------------------------------------------------
-    // 4）Viterbi（API利用・DP）
-    // ----------------------------------------------------------
-    panel.textContent += '\n--- Viterbi（API利用・DP） ---\n';
-    try {
-      const orsBefore = API_USED.orsTotal;
-      const ovpBefore = API_USED.overpassTotal;
+// ----------------------------------------------------------
+// 4）Viterbi（API利用・DP）※MSEのみ・近さ/perpで評価しない版
+// ----------------------------------------------------------
+panel.textContent += '\n--- Viterbi（API利用・DP：MSEのみ） ---\n';
+try {
+  const orsBefore = API_USED.orsTotal;
+  const ovpBefore = API_USED.overpassTotal;
 
-      const vitGroups = topPoisPerTriggerForLinear(5);
+  // ★候補生成：restGroups（[{rest, pois:[...]}]）から、そのまま配列にする
+  //   ※並べ替え（distFromTriggerM / perpM）は一切しない
+  const capPerTrigger = Math.max(1, Number($('poiLimit')?.value) || 5); // 例：poiLimitを流用
+  const vitGroups = (restGroups || []).map((g, i) => {
+    const arr = Array.isArray(g?.pois) ? g.pois.filter(Boolean) : [];
+    if (!arr.length) throw new Error(`トリガー#${i+1} に候補POIがありません`);
+    // ★評価で絞らず「先頭からcap件」だけ（資源制約）
+    return arr.slice(0, Math.min(capPerTrigger, arr.length));
+  });
 
-      if (!vitGroups || !vitGroups.length) {
-        panel.textContent += '(候補なし)\n';
-      } else {
-        const t0 = performance.now();
-        const vitList = await runViterbiOnce_API(start, goal, vitGroups, profile);
-        const t1 = performance.now();
+  if (!vitGroups || !vitGroups.length) {
+    panel.textContent += '(候補なし)\n';
+  } else {
+    const t0 = performance.now();
+    const vitList = await runViterbiOnce_API(start, goal, vitGroups, profile);
+    const t1 = performance.now();
 
-        const ms = t1 - t0;
-        const ors = API_USED.orsTotal - orsBefore;
-        const ov  = API_USED.overpassTotal - ovpBefore;
+    const ms  = t1 - t0;
+    const ors = API_USED.orsTotal - orsBefore;
+    const ov  = API_USED.overpassTotal - ovpBefore;
 
-        if (!vitList || !vitList.length) {
-          panel.textContent += '(候補なし)\n';
-        } else {
-          // ★bf_rank 付与
-          attachBfRank(vitList, bfRankMap);
+    if (!vitList || !vitList.length) {
+      panel.textContent += '(候補なし)\n';
+    } else {
+      attachBfRank(vitList, bfRankMap);
 
-          panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
-          panel.textContent += `ORS呼び出し: ${ors} 回\n`;
-          panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
+      panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+      panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+      panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
-          showAlgoListInPanel(panel, vitList, 'viterbi');
-          pushAlgoResultsForCsv('viterbi','Viterbi（API・DP）',vitList,ms,ors,ov);
-        }
-      }
-    } catch (e) {
-      console.error('[viterbi] error', e);
-      panel.textContent += '\n[viterbi エラー] ' + (e.message || e) + '\n';
+      showAlgoListInPanel(panel, vitList, 'viterbi');
+      pushAlgoResultsForCsv('viterbi','Viterbi（API・DP：MSEのみ）',vitList,ms,ors,ov);
     }
+  }
+} catch (e) {
+  console.error('[viterbi] error', e);
+  panel.textContent += '\n[viterbi エラー] ' + (e.message || e) + '\n';
+}
 
     // ----------------------------------------------------------
     // 5）対策A：Viterbi TopK → 総量MSE再ランキング（API）
@@ -3725,5 +3732,6 @@ function autoBeamParams(restGroups, opt = {}){
 </script>
 </body>
 </html>
+
 
 
