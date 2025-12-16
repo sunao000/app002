@@ -2933,98 +2933,98 @@ try {
   panel.textContent += '\n[viterbi エラー] ' + (e.message || e) + '\n';
 }
 
-    // ----------------------------------------------------------
-    // 5）対策A：TopK増 + beamWidth増（再ランキング）
-    // ----------------------------------------------------------
-    panel.textContent += '\n--- 対策A：Viterbi TopK→総量MSE再ランキング（API） ---\n';
-    try {
-      const orsBefore = API_USED.orsTotal;
-      const ovpBefore = API_USED.overpassTotal;
+//     // ----------------------------------------------------------
+//     // 5）対策A：TopK増 + beamWidth増（再ランキング）
+//     // ----------------------------------------------------------
+//     panel.textContent += '\n--- 対策A：Viterbi TopK→総量MSE再ランキング（API） ---\n';
+//     try {
+//       const orsBefore = API_USED.orsTotal;
+//       const ovpBefore = API_USED.overpassTotal;
 
-      const groupsA = topPoisPerTriggerForLinear(5);
+//       const groupsA = topPoisPerTriggerForLinear(5);
 
-      if (!groupsA || !groupsA.length) {
-        panel.textContent += '(候補なし)\n';
-      } else {
-        const t0 = performance.now();
-        const aList = await runViterbiTopK_Rerank_All_API(start, goal, groupsA, profile, {
-  beamWidth: 40,  // ★② 増やす
-  topK: 150       // ★① 増やす
-});
-        const t1 = performance.now();
+//       if (!groupsA || !groupsA.length) {
+//         panel.textContent += '(候補なし)\n';
+//       } else {
+//         const t0 = performance.now();
+//         const aList = await runViterbiTopK_Rerank_All_API(start, goal, groupsA, profile, {
+//   beamWidth: 40,  // ★② 増やす
+//   topK: 150       // ★① 増やす
+// });
+//         const t1 = performance.now();
 
-        const ms = t1 - t0;
-        const ors = API_USED.orsTotal - orsBefore;
-        const ov  = API_USED.overpassTotal - ovpBefore;
+//         const ms = t1 - t0;
+//         const ors = API_USED.orsTotal - orsBefore;
+//         const ov  = API_USED.overpassTotal - ovpBefore;
 
-        if (!aList || !aList.length) {
-          panel.textContent += '(候補なし)\n';
-        } else {
-          // ★bf_rank 付与
-          attachBfRank(aList, bfRankMap);
+//         if (!aList || !aList.length) {
+//           panel.textContent += '(候補なし)\n';
+//         } else {
+//           // ★bf_rank 付与
+//           attachBfRank(aList, bfRankMap);
 
-          panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
-          panel.textContent += `ORS呼び出し: ${ors} 回\n`;
-          panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
+//           panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+//           panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+//           panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
-          showAlgoListInPanel(panel, aList.slice(0,3), 'viterbi_topk_rerank'); // 表示は3件だけでOK
-          pushAlgoResultsForCsv(
-            'viterbi_topk_rerank',
-            '対策A：Viterbi TopK→総量MSE再ランキング',
-            aList,
-            ms,
-            ors,
-            ov
-          );
-        }
-      }
-    } catch (e) {
-      console.error('[viterbi_topk_rerank] error', e);
-      panel.textContent += '\n[対策A エラー] ' + (e.message || e) + '\n';
-    }
+//           showAlgoListInPanel(panel, aList.slice(0,3), 'viterbi_topk_rerank'); // 表示は3件だけでOK
+//           pushAlgoResultsForCsv(
+//             'viterbi_topk_rerank',
+//             '対策A：Viterbi TopK→総量MSE再ランキング',
+//             aList,
+//             ms,
+//             ors,
+//             ov
+//           );
+//         }
+//       }
+//     } catch (e) {
+//       console.error('[viterbi_topk_rerank] error', e);
+//       panel.textContent += '\n[対策A エラー] ' + (e.message || e) + '\n';
+//     }
 
-    // ----------------------------------------------------------
-    // 6）対策B：A + 重複排除（再ランキング）
-    // ----------------------------------------------------------
-    panel.textContent += '\n--- 対策B：Viterbi（L1加法・API） ---\n';
-    try {
-      const orsBefore = API_USED.orsTotal;
-      const ovpBefore = API_USED.overpassTotal;
+//     // ----------------------------------------------------------
+//     // 6）対策B：A + 重複排除（再ランキング）
+//     // ----------------------------------------------------------
+//     panel.textContent += '\n--- 対策B：Viterbi（L1加法・API） ---\n';
+//     try {
+//       const orsBefore = API_USED.orsTotal;
+//       const ovpBefore = API_USED.overpassTotal;
 
-      const groupsB = topPoisPerTriggerForLinear(5);
+//       const groupsB = topPoisPerTriggerForLinear(5);
 
-      if (!groupsB || !groupsB.length) {
-        panel.textContent += '(候補なし)\n';
-      } else {
-        const t0 = performance.now();
-        const bList = await runViterbiTopK_Rerank_All_API_Dedupe(start, goal, groupsB, profile, {
-  beamWidth: 40,  // ★②
-  topK: 150       // ★①
-});
-        const t1 = performance.now();
+//       if (!groupsB || !groupsB.length) {
+//         panel.textContent += '(候補なし)\n';
+//       } else {
+//         const t0 = performance.now();
+//         const bList = await runViterbiTopK_Rerank_All_API_Dedupe(start, goal, groupsB, profile, {
+//   beamWidth: 40,  // ★②
+//   topK: 150       // ★①
+// });
+//         const t1 = performance.now();
 
-        const ms = t1 - t0;
-        const ors = API_USED.orsTotal - orsBefore;
-        const ov  = API_USED.overpassTotal - ovpBefore;
+//         const ms = t1 - t0;
+//         const ors = API_USED.orsTotal - orsBefore;
+//         const ov  = API_USED.overpassTotal - ovpBefore;
 
-        if (!bList || !bList.length) {
-          panel.textContent += '(候補なし)\n';
-        } else {
-          // ★bf_rank 付与
-          attachBfRank(bList, bfRankMap);
+//         if (!bList || !bList.length) {
+//           panel.textContent += '(候補なし)\n';
+//         } else {
+//           // ★bf_rank 付与
+//           attachBfRank(bList, bfRankMap);
 
-          panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
-          panel.textContent += `ORS呼び出し: ${ors} 回\n`;
-          panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
+//           panel.textContent += `処理時間: ${ms.toFixed(1)} ms\n`;
+//           panel.textContent += `ORS呼び出し: ${ors} 回\n`;
+//           panel.textContent += `Overpass呼び出し: ${ov} 回\n\n`;
 
-          showAlgoListInPanel(panel, bList.slice(0,3), 'viterbi_l1'); // 表示は3件だけでOK
-          pushAlgoResultsForCsv('viterbi_l1','対策B：Viterbi（L1加法）',bList,ms,ors,ov);
-        }
-      }
-    } catch (e) {
-      console.error('[viterbi_l1] error', e);
-      panel.textContent += '\n[対策B エラー] ' + (e.message || e) + '\n';
-    }
+//           showAlgoListInPanel(panel, bList.slice(0,3), 'viterbi_l1'); // 表示は3件だけでOK
+//           pushAlgoResultsForCsv('viterbi_l1','対策B：Viterbi（L1加法）',bList,ms,ors,ov);
+//         }
+//       }
+//     } catch (e) {
+//       console.error('[viterbi_l1] error', e);
+//       panel.textContent += '\n[対策B エラー] ' + (e.message || e) + '\n';
+//     }
 
     // ----------------------------------------------------------
     // 全体時間
@@ -3162,15 +3162,13 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
     // const mseB = (b.stats
     //   ? routeMseScoreFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
     //   : NaN);
-        const eA = (a.stats ? routeEnergyMseFromStats(a.stats, idealEnergyPerLeg) : NaN);
-        const eB = (b.stats ? routeEnergyMseFromStats(b.stats, idealEnergyPerLeg) : NaN);
+const eA = (a.stats ? routeEnergyMseFromStats(a.stats, idealEnergyPerLeg) : NaN);
+  const eB = (b.stats ? routeEnergyMseFromStats(b.stats, idealEnergyPerLeg) : NaN);
 
-    
-
-    const sA = Number.isFinite(mseA) ? mseA : (a.score ?? a.rawScore ?? Infinity);
-    const sB = Number.isFinite(mseB) ? mseB : (b.score ?? b.rawScore ?? Infinity);
-    return sA - sB;
-  });
+  const sA = Number.isFinite(eA) ? eA : (a.score ?? a.rawScore ?? Infinity);
+  const sB = Number.isFinite(eB) ? eB : (b.score ?? b.rawScore ?? Infinity);
+  return sA - sB;
+});
 
   resultList.forEach((r, idx)=>{
     const rank = idx + 1;
@@ -3179,20 +3177,30 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
     const sigmaTime   = stdDev(r.stats?.time || []);
     const sigmaEnergy = stdDev(r.stats?.energy || []);
 
-    let mseScore = NaN;
-    if (r.stats) {
-      mseScore = routeMseScoreFromStats(
-        r.stats,
-        idealDistPerLeg,
-        idealTimePerLeg,
-        idealEnergyPerLeg
-      );
-    }
+    // let mseScore = NaN;
+    // if (r.stats) {
+    //   mseScore = routeMseScoreFromStats(
+    //     r.stats,
+    //     idealDistPerLeg,
+    //     idealTimePerLeg,
+    //     idealEnergyPerLeg
+    //   );
+    // }
 
-    const scoreForCsv =
-      Number.isFinite(mseScore)
-        ? mseScore
-        : (r.score ?? r.rawScore ?? 0);
+    // const scoreForCsv =
+    //   Number.isFinite(mseScore)
+    //     ? mseScore
+    //     : (r.score ?? r.rawScore ?? 0);
+    let eScore = NaN;
+if (r.stats) {
+  eScore = routeEnergyMseFromStats(r.stats, idealEnergyPerLeg);
+}
+
+const scoreForCsv =
+  Number.isFinite(eScore)
+    ? eScore
+    : (r.score ?? r.rawScore ?? 0);
+
 
     let poiList = (r.picks || r.picksByTrigger || []).filter(Boolean);
     if (Array.isArray(poiList[0])) poiList = poiList.flat().filter(Boolean);
@@ -4159,5 +4167,6 @@ function bindPoiLegCostsExportButtonOnce(){
 </script>
 </body>
 </html>
+
 
 
