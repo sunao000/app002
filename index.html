@@ -2150,43 +2150,68 @@ function buildLinearAlgoRows(start, goal, groups, hardCap = 200000) {
 //   - 返り値   : { total, distKm, timeMin, energyKj }
 //     ※ total は後方互換用（今後は使わず、MSEで評価）
 // ======================================================
+// async function calcLegCostWithApi(from, to, profile){
+//   if (!from || !to) {
+//     throw new Error('calcLegCostWithApi: from/to が不正です');
+//   }
+
+//   const wps = [
+//     {
+//       lat: from.lat ?? from.latitude  ?? from.y,
+//       lon: from.lon ?? from.longitude ?? from.x
+//     },
+//     {
+//       lat: to.lat   ?? to.latitude    ?? to.y,
+//       lon: to.lon   ?? to.longitude   ?? to.x
+//     }
+//   ];
+
+//   // 既に使っている ORS ヘルパーを流用
+//   const out = await routeLegStatsForWaypoints(wps, profile);
+//   const feature = out?.feature;
+//   const summary = feature?.properties?.summary || {};
+
+//   const distM = Number(summary.distance) || 0;   // m
+//   const timeS = Number(summary.duration) || 0;   // s
+
+//   const distKm  = distM / 1000;
+//   const timeMin = timeS / 60;
+
+//   // ★ 既存のエネルギー計算ロジックを利用（stepごとに energyStepKJ）
+//   const mass = 75;   // 他の箇所と合わせる
+//   const flat = 18;
+//   const energyKj = await totalEnergyKJ(feature, mass, flat); // kJ
+
+//   // total は後方互換用：とりあえず距離ベース
+//   const total = distKm;
+
+//   return { total, distKm, timeMin, energyKj };
+// }
 async function calcLegCostWithApi(from, to, profile){
-  if (!from || !to) {
-    throw new Error('calcLegCostWithApi: from/to が不正です');
-  }
+  if (!from || !to) throw new Error('calcLegCostWithApi: from/to が不正です');
 
   const wps = [
-    {
-      lat: from.lat ?? from.latitude  ?? from.y,
-      lon: from.lon ?? from.longitude ?? from.x
-    },
-    {
-      lat: to.lat   ?? to.latitude    ?? to.y,
-      lon: to.lon   ?? to.longitude   ?? to.x
-    }
+    { lat: from.lat ?? from.latitude ?? from.y, lon: from.lon ?? from.longitude ?? from.x },
+    { lat: to.lat   ?? to.latitude   ?? to.y, lon: to.lon   ?? to.longitude   ?? to.x }
   ];
 
-  // 既に使っている ORS ヘルパーを流用
   const out = await routeLegStatsForWaypoints(wps, profile);
   const feature = out?.feature;
   const summary = feature?.properties?.summary || {};
 
-  const distM = Number(summary.distance) || 0;   // m
-  const timeS = Number(summary.duration) || 0;   // s
+  const distM = Number(summary.distance) || 0;
+  const timeS = Number(summary.duration) || 0;
 
   const distKm  = distM / 1000;
   const timeMin = timeS / 60;
 
-  // ★ 既存のエネルギー計算ロジックを利用（stepごとに energyStepKJ）
-  const mass = 75;   // 他の箇所と合わせる
-  const flat = 18;
-  const energyKj = await totalEnergyKJ(feature, mass, flat); // kJ
+  // ★ここがポイント：総当たりと同じ calcLegStats 由来の energy を使う
+  const eArr = out?.stats?.energy || [];
+  const energyKj = Number(eArr[0]); // 2点なのでレグは1つのはず
 
-  // total は後方互換用：とりあえず距離ベース
-  const total = distKm;
-
-  return { total, distKm, timeMin, energyKj };
+  return { total: distKm, distKm, timeMin, energyKj };
 }
+
 
 // Viterbi（API利用版）
 // start, goal: {lat, lon} 形式
@@ -4191,6 +4216,7 @@ function updatePoiLegCostsExportButtonState(){
 </script>
 </body>
 </html>
+
 
 
 
