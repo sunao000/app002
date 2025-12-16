@@ -2311,30 +2311,42 @@ async function runViterbiOnce_API(start, goal, restGroups, profile) {
   }
 
   // ★ ルート全体の stats を1回だけ計算（σ表示やCSV用）
-  let feature = null;
-  let stats   = { dist:[], time:[], energy:[] };
-  try {
-    const wps = [start, ...picks, goal].map(p => ({
-      lat: p.lat,
-      lon: p.lon,
-      name: p.name || 'POI'
-    }));
-    const out = await routeLegStatsForWaypoints(wps, profile);
-    feature = out.feature;
-    if (out.stats) stats = out.stats;
-  } catch (e) {
-    console.warn('[Viterbi] 統計計算用ルート生成に失敗', e);
-  }
+let feature = null;
+let stats   = { dist:[], time:[], energy:[] };
+let finalScore = bestFinalCost; // ← フォールバック（stats取れない時）
 
-  return [{
-    score:    bestFinalCost,   // 合計MSE（小さいほど「理想ペースに近い」）
-    rawScore: bestFinalCost,
-    feature,
+try {
+  const wps = [start, ...picks, goal].map(p => ({
+    lat: p.lat,
+    lon: p.lon,
+    name: p.name || 'POI'
+  }));
+
+  const out = await routeLegStatsForWaypoints(wps, profile);
+  feature = out?.feature || null;
+  if (out?.stats) stats = out.stats;
+
+  // ★ここが本命：総当たりと同じ「総量MSE」を最終スコアにする
+  const exactMse = routeMseScoreFromStats(
     stats,
-    picks,
-    picksByTrigger: picks
-  }];
+    idealDistPerLeg,
+    idealTimePerLeg,
+    idealEnergyPerLeg
+  );
+  if (Number.isFinite(exactMse)) finalScore = exactMse;
+
+} catch (e) {
+  console.warn('[Viterbi] 統計計算用ルート生成に失敗', e);
 }
+
+return [{
+  score:    finalScore,     // ★総当たりと同じ土俵のスコア
+  rawScore: bestFinalCost,  // ★DPで積んだ近似（比較・デバッグ用に残す）
+  feature,
+  stats,
+  picks,
+  picksByTrigger: picks
+}];
 
 // 表示とCSV出力
 function renderLinearResults(rows){
@@ -3732,6 +3744,7 @@ function autoBeamParams(restGroups, opt = {}){
 </script>
 </body>
 </html>
+
 
 
 
