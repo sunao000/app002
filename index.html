@@ -3157,12 +3157,9 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
     // const mseB = (b.stats
     //   ? routeMseScoreFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
     //   : NaN);
-        const mseA = (a.stats
-      ? routeEnergyMseFromStats(a.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
-      : NaN);
-    const mseB = (b.stats
-      ? routeEnergyMseFromStats(b.stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg)
-      : NaN);
+        const eA = (a.stats ? routeEnergyMseFromStats(a.stats, idealEnergyPerLeg) : NaN);
+        const eB = (b.stats ? routeEnergyMseFromStats(b.stats, idealEnergyPerLeg) : NaN);
+
     
 
     const sA = Number.isFinite(mseA) ? mseA : (a.score ?? a.rawScore ?? Infinity);
@@ -3941,3 +3938,4 @@ function routeEnergyMseFromStats(stats, idealEnergyPerLeg){
 </script>
 </body>
 </html>
+
