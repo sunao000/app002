@@ -2915,7 +2915,7 @@ try {
 }
 
     // ----------------------------------------------------------
-    // 5）対策A：Viterbi TopK → 総量MSE再ランキング（API）
+    // 5）対策A：対策A：TopK増 + beamWidth増（再ランキング）
     // ----------------------------------------------------------
     panel.textContent += '\n--- 対策A：Viterbi TopK→総量MSE再ランキング（API） ---\n';
     try {
@@ -2929,9 +2929,9 @@ try {
       } else {
         const t0 = performance.now();
         const aList = await runViterbiTopK_Rerank_API(start, goal, groupsA, profile, {
-          beamWidth: 10,
-          topK: 50
-        });
+  beamWidth: 40,  // ★② 増やす
+  topK: 150       // ★① 増やす
+});
         const t1 = performance.now();
 
         const ms = t1 - t0;
@@ -2965,7 +2965,7 @@ try {
     }
 
     // ----------------------------------------------------------
-    // 6）対策B：Viterbi（L1加法・API）
+    // 6）対策B：対策B：A + 重複排除（再ランキング）
     // ----------------------------------------------------------
     panel.textContent += '\n--- 対策B：Viterbi（L1加法・API） ---\n';
     try {
@@ -2978,7 +2978,10 @@ try {
         panel.textContent += '(候補なし)\n';
       } else {
         const t0 = performance.now();
-        const bList = await runViterbiOnce_API_L1(start, goal, groupsB, profile);
+        const bList = await runViterbiTopK_Rerank_API_Dedupe(start, goal, groupsB, profile, {
+  beamWidth: 40,  // ★②
+  topK: 150       // ★①
+});
         const t1 = performance.now();
 
         const ms = t1 - t0;
@@ -3741,12 +3744,63 @@ function autoBeamParams(restGroups, opt = {}){
 
   return { beamWidth, topK, T, Kmin, Kavg };
 }
-  
+
+// ---- 対策B：TopKを重複排除してから総量MSEで再ランキング（API） ----
+async function runViterbiTopK_Rerank_API_Dedupe(start, goal, restGroups, profile, opt = {}){
+  const topKList = await runViterbiTopK_API(start, goal, restGroups, profile, opt);
+  if (!topKList.length) return [];
+
+  // ★③ 重複排除：同じ picksByTrigger を除外
+  const seen = new Set();
+  const uniq = [];
+  for (const c of topKList){
+    const key = comboKeyFromPicksByTrigger(c.picksByTrigger, 6); // 既存関数を流用
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniq.push(c);
+  }
+  if (!uniq.length) return [];
+
+  // --- 以下は runViterbiTopK_Rerank_API と同じ（総量MSEで再評価） ---
+  const cumTotals = window.__cumTotals || {};
+  const totalDkm  = (Number(cumTotals.D) || 0) / 1000;
+  const totalTmin = (Number(cumTotals.T) || 0) / 60;
+  const totalEkJ  = Number(cumTotals.E)  || 0;
+
+  const T = restGroups.length;
+  const R = T + 1;
+  const idealDistPerLeg   = R > 0 ? totalDkm  / R : 0;
+  const idealTimePerLeg   = R > 0 ? totalTmin / R : 0;
+  const idealEnergyPerLeg = R > 0 ? totalEkJ  / R : 0;
+
+  const rescored = [];
+  for (const c of uniq){
+    try{
+      const wps = [start, ...c.picks, goal].map(p=>({lat:p.lat, lon:p.lon, name:p.name||'POI'}));
+      const out = await routeLegStatsForWaypoints(wps, profile);
+      const feature = out?.feature;
+      const stats   = out?.stats;
+
+      const mseScore = routeMseScoreFromStats(stats, idealDistPerLeg, idealTimePerLeg, idealEnergyPerLeg);
+
+      rescored.push({
+        score: mseScore,          // ★最終評価（総当たりと同じ）
+        rawScore: c.approxScore,  // 近似スコア（参考）
+        feature,
+        stats,
+        picks: c.picks,
+        picksByTrigger: c.picksByTrigger
+      });
+    }catch(e){
+      console.warn('[viterbi_topk_rerank_dedupe] candidate route fail', e);
+    }
+  }
+
+  if (!rescored.length) return [];
+  rescored.sort((a,b)=>a.score-b.score);
+  return [rescored[0]];
+}
+
 </script>
 </body>
 </html>
-
-
-
-
-
