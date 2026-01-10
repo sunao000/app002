@@ -219,32 +219,16 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
 
 <pre id="viterbiEdgePanel" style="display:none;max-height:260px;overflow:auto;border:1px solid #ddd;padding:8px;background:#fafafa;"></pre>
 
-<label><input type="checkbox" id="dbg_beam" checked> ビーム</label>
-<label><input type="checkbox" id="dbg_bf" checked> 総当たり</label>
-<label><input type="checkbox" id="dbg_vit" checked> Viterbi</label>
-<label><input type="checkbox" id="dbg_A" checked> 対策A</label>
-<label><input type="checkbox" id="dbg_B" checked> 対策B</label>
-<label><input type="checkbox" id="dbg_C" checked> 対策C</label>
-<label><input type="checkbox" id="dbg_D" checked> 対策D</label>
-<label><input type="checkbox" id="dbg_E" checked> 対策E</label>
-<label><input type="checkbox" id="dbg_F" checked> 対策F</label>
-<label><input type="checkbox" id="dbg_G" checked> 対策G</label>
-<label><input type="checkbox" id="dbg_H" checked> 対策H</label>
-
-<label style="display:inline-flex;align-items:center;gap:6px">
-  A/B beamWidth
-  <input id="abBeamWidth" type="number" min="1" step="1" value="40" style="width:72px">
-</label>
-
-<label style="display:inline-flex;align-items:center;gap:6px">
-  A/B topK
-  <input id="abTopK" type="number" min="1" step="1" value="150" style="width:72px">
-</label>
-
-<label style="display:inline-flex;align-items:center;gap:6px">
-  自動調整
-  <input id="abAutoParams" type="checkbox" checked>
-</label>
+<div style="display:flex; flex-direction:column; gap:4px; margin:8px 0; padding:8px; background:#f9f9f9; border:1px solid #ddd; border-radius:4px;">
+  <div style="font-weight:bold; margin-bottom:4px; color:#555;">比較するアルゴリズム</div>
+  <label><input type="checkbox" id="dbg_bf" checked> 1. 総当たり (Ground Truth)</label>
+  <label><input type="checkbox" id="dbg_vit_pure" checked> 2. 純粋Viterbi (Goal無視)</label>
+  <label><input type="checkbox" id="dbg_linear" checked> 3. 直線比較 (Zero API)</label>
+  <label><input type="checkbox" id="dbg_beam" checked> 4. 純粋ビームサーチ (Width=5)</label>
+  <label><input type="checkbox" id="dbg_vit_sg_excl" checked> 5. SG排除・純粋Viterbi</label>
+  <label><input type="checkbox" id="dbg_vit_rerank" checked> 6. 純粋Viterbi + 再ランク</label>
+  <label><input type="checkbox" id="dbg_vit_sg_excl_rerank" checked> 7. SG排除・純粋Viterbi + 再ランク</label>
+</div>
 
 <!-- サマリー -->
 <div id="summary">
@@ -5008,4 +4992,5 @@ async function runAlgoCompareDebug(){
 </script>
 </body>
 </html>
+
 
