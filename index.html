@@ -1429,15 +1429,15 @@ async function totalEnergyKJ(feature,mass,flat){
    【完全修正版】休憩トリガー生成
    ※計算結果がNaNになった地点は、リストに追加せず完全に無視します。
    ========================================================== */
-async function makeRestPoints(feature, mass, flat) {
+// async, mass, flat を削除してシンプルに
+function makeRestPoints(feature) {
   const coords = feature.geometry.coordinates;
   const totalD = feature.properties.summary.distance || 0; 
-  const totalE = await totalEnergyKJ(feature, mass, flat); 
+  // ★削除: const totalE = await totalEnergyKJ(feature, mass, flat); 
 
   // 1. 累積距離の計算
   const cumDist = [0];
   for(let i=1; i<coords.length; i++){
-    // GeoJSONは [lon, lat]
     const p1 = L.latLng(coords[i][1], coords[i][0]);
     const p2 = L.latLng(coords[i-1][1], coords[i-1][0]);
     cumDist[i] = cumDist[i-1] + p1.distanceTo(p2);
@@ -1461,7 +1461,7 @@ async function makeRestPoints(feature, mass, flat) {
       count = parseInt(document.getElementById('restCount').value) || 3;
       logRest(`[基本] 回数指定: ${count}回 → 等間隔配置`);
     } else {
-      // 自動計算（区間数 - 1）
+      // 自動計算
       const totalKm = totalD / 1000;
       const unitVal = parseFloat(document.getElementById('autoUnitValue')?.value) || 20;
       const rawSegments = (unitVal > 0) ? (totalKm / unitVal) : 0;
@@ -1522,7 +1522,7 @@ async function makeRestPoints(feature, mass, flat) {
     }
   }
 
-  // 4. 座標特定 & エラー排除 (★ここが重要)
+  // 4. 座標特定 & エラー排除
   const results = [];
   const skipGoalOn = document.getElementById('skipNearGoalToggle')?.checked;
   const skipNodeOn = document.getElementById('skipNearNodeToggle')?.checked;
@@ -1541,10 +1541,9 @@ async function makeRestPoints(feature, mass, flat) {
       continue;
     }
 
-    // インデックス特定（範囲外参照を防ぐ）
     let idx = cumDist.findIndex(d => d >= distM);
     if (idx === -1) idx = cumDist.length - 1; 
-    if (idx < 1) idx = 1; // idx-1 が -1 になるのを防ぐ
+    if (idx < 1) idx = 1;
     
     const prevD = cumDist[idx-1];
     const nextD = cumDist[idx];
@@ -1559,7 +1558,6 @@ async function makeRestPoints(feature, mass, flat) {
       const prevLat = coords[idx-1][1];
       const prevLon = coords[idx-1][0];
       
-      // 計算前に値をチェック
       if (Number.isFinite(prevLat) && Number.isFinite(prevLon) && 
           Number.isFinite(lat) && Number.isFinite(lon)) {
         lat = prevLat + (lat - prevLat) * ratio;
@@ -1567,13 +1565,11 @@ async function makeRestPoints(feature, mass, flat) {
       }
     }
 
-    // ★★★ 最終チェック: NaNが含まれていたら絶対に追加しない ★★★
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       console.warn(`[makeRestPoints] 計算エラー(NaN)のため地点スキップ: ${distM}m`);
       continue; 
     }
 
-    // 既存地点との重複チェック
     if (skipNodeOn && isNearNode(lat, lon)) {
       logRest(`[スキップ] 既存地点の近く`);
       continue;
@@ -5066,7 +5062,7 @@ async function calcLegCostWithApi(from, to, profile){
   }
 
   const wps = [ { lat: fromLat, lon: fromLon }, { lat: toLat, lon: toLon } ];
-  const ideals = (typeof getIdealPerLegs === 'function') ? getIdealPerLegs() : { idealDistPerLeg: 0, idealEnergyPerLeg: 0 };
+  const ideals = (typeof getIdealPerLegs === 'function') ? getIdealPerLegs() : { idealDistPerLeg: 0 };
 
   try {
     // API呼び出し
@@ -5078,15 +5074,6 @@ async function calcLegCostWithApi(from, to, profile){
     const summary = out?.feature?.properties?.summary || {};
     const distKm  = (Number(summary.distance) || 0) / 1000;
     const timeMin = (Number(summary.duration) || 0) / 60;
-    
-    const ene = out?.stats?.energy ?? out?.stats?.E ?? null;
-    let energyKj = 0;
-    if (Array.isArray(ene) && ene.length) {
-      const last = Number(ene[ene.length - 1]);
-      energyKj = (Number.isFinite(last) && last > 0) ? last : sumNums(ene);
-    } else if (Number.isFinite(Number(ene))) {
-      energyKj = Number(ene);
-    }
 
     // エッジログ記録
     if (window.__collectViterbiEdges) {
@@ -5094,18 +5081,18 @@ async function calcLegCostWithApi(from, to, profile){
       window.__viterbiAllEdgeRows.push({
         fromId, toId, fromName, toName,
         fromLat, fromLon, toLat, toLon,
-        distKm, timeMin, energyKj,
+        distKm, timeMin, 
+        // energyKj 削除
         profile,
         ms: elapsedMs, // 確定した時間を使用
         ok: true,
         errMsg: '',
-        idealDistKm: ideals.idealDistPerLeg,
-        idealEnergyKj: ideals.idealEnergyPerLeg
+        idealDistKm: ideals.idealDistPerLeg
       });
     }
 
     const result = { 
-        total: distKm, distKm, timeMin, energyKj,
+        total: distKm, distKm, timeMin, 
         rawFeature: out.feature,
         rawStats: out.stats,
         // ★重要: かかった時間を結果オブジェクトに埋め込む
@@ -5124,18 +5111,18 @@ async function calcLegCostWithApi(from, to, profile){
       window.__viterbiAllEdgeRows.push({
         fromId, toId, fromName, toName,
         fromLat, fromLon, toLat, toLon,
-        distKm: '', timeMin: '', energyKj: '',
+        distKm: '', timeMin: '', 
         profile,
         ms: errMs,
         ok: false,
         errMsg: String(e?.message || e),
-        idealDistKm: ideals.idealDistPerLeg,
-        idealEnergyKj: ideals.idealEnergyPerLeg
+        idealDistKm: ideals.idealDistPerLeg
       });
     }
     throw e;
   }
 }
+  
 // 5. Edge(Viterbi)用: CSVダウンロード (ID列追加)
 function downloadViterbiLogCsv() {
   const rows = window.__viterbiAllEdgeRows || [];
@@ -5189,6 +5176,7 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
 
 
 
