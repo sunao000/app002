@@ -2346,10 +2346,10 @@ function downloadAlgoCompareCsv(){
   downloadBlob(blob, 'algo_compare_debug.csv');
 }
   
-// 総当たりCSV
+// 総当たり結果表示
 function renderBruteforceAllResults(results){
   const box = $('bruteforceAllList');
-  const btn = $('btnDownloadBruteforceCsv');
+  const btn = $('btnDownloadBruteforceCsv'); // ※これに対応するCSV関数もヘッダー修正推奨
   if (!box) return;
 
   if (!results || !results.length){
@@ -2372,10 +2372,9 @@ function renderBruteforceAllResults(results){
       .filter(Boolean)
       .map(p => p.name || 'POI')
       .join(' -> ');
-
     lines.push(
-      `#${rank} score=${(r.score ?? 0).toFixed(4)} raw=${(r.rawScore ?? r.score ?? 0).toFixed(4)} ` +
-      `σd=${sig.dist.toFixed(2)}km σt=${sig.time.toFixed(2)}min`
+      `#${rank} MSE=${(r.score ?? 0).toFixed(4)} (raw=${(r.rawScore ?? r.score ?? 0).toFixed(4)}) ` +
+      `σdist=${sig.dist.toFixed(2)}km`
     );
     lines.push(
       `   picks: ${names}`
@@ -4128,30 +4127,24 @@ function getPoiId(p) {
   return `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
 }
 
-// 2. アルゴリズム比較用: CSVダウンロード (理想距離列を追加)
 function downloadAlgoCompareCsv(){
   const rows = window.__algoCompareRows || [];
   if (!rows.length){
     alert('先に「アルゴリズム比較デバッグ」を実行してください');
     return;
   }
-
   const header = [
-    'algo',
-    'label',
-    'rank',
-    'bf_rank',
-    'score',
-    'rawScore',
-    'sigmaDist_km',
-    'sigmaTime_min',
-    'sigmaEnergy_kJ',
-    'time_ms',
-    'ors_calls',
+    'algo', 'label', 'rank', 'bf_rank',
+    'mse_score',
+    'raw_score',
+    'sigma_dist_km',    // 標準偏差
+    'sigma_time_min',
+    'time_ms', 
+    'ors_calls', 
     'overpass_calls',
-    'ideal_dist_km',  // ★追加
-    'poi_names',
-    'poi_ids',
+    'ideal_dist_km',
+    'poi_names', 
+    'poi_ids', 
     'poi_latlngs'
   ];
 
@@ -4164,11 +4157,10 @@ function downloadAlgoCompareCsv(){
     r.rawScore ?? '',
     r.sigmaDist ?? '',
     r.sigmaTime ?? '',
-    r.sigmaEnergy ?? '',
     r.timeMs ?? '',
     r.orsCalls ?? '',
     r.overpassCalls ?? '',
-    formatNum(r.idealDistKm, 3), // ★追加
+    formatNum(r.idealDistKm, 3),
     `"${csvEscape(r.poiNames ?? '')}"`,
     `"${csvEscape(r.poiIds ?? '')}"`,
     `"${csvEscape(r.poiLatLngs ?? '')}"`
@@ -4322,3 +4314,4 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
