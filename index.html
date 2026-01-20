@@ -102,7 +102,6 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
         <input id="percentStep" type="number" value="25" style="width:40px;"> %ごと
         <select id="percentMetric" style="font-size:0.9em;">
           <option value="distance" selected>距離</option>
-          <option value="energy">エネルギー</option>
           <option value="time">時間</option>
         </select>
       </div>
@@ -431,7 +430,6 @@ function comboScore(legStats){
   };
   const metric = getScoreMetric();
   if (metric === 'time')   return sd(legStats.time);
-  if (metric === 'energy') return sd(legStats.energy);
   return sd(legStats.dist); // default: distance
 }
 
@@ -439,7 +437,6 @@ function comboScore(legStats){
 function evalByCums(restGroups, picksByTrigger, cumTotals){
   const totalD = Number(cumTotals?.D) || 0;   // m
   const totalT = Number(cumTotals?.T) || 0;   // s
-  const totalE = Number(cumTotals?.E) || 0;   // kJ
 
   // 休憩分割による「区切り」を累積距離で作る
   const cuts = [0];
@@ -460,13 +457,12 @@ function evalByCums(restGroups, picksByTrigger, cumTotals){
   }
 
   // 区間時間/エネルギーは距離比分配（総量が0なら均等割）
-  const time = [], energy = [];
+  const time = [];
   if (dist.length){
     if (totalD > 0 && Number.isFinite(totalD)){
       for (const d of dist){
         const ratio = ((d*1000) / totalD); // 0..1
         time.push((totalT/60) * (Number.isFinite(ratio)? ratio : 0)); // 分
-        energy.push(totalE * (Number.isFinite(ratio)? ratio : 0));    // kJ
       }
     } else {
       const eqT = (totalT/60) / dist.length;
@@ -489,7 +485,7 @@ function evalByCums(restGroups, picksByTrigger, cumTotals){
 
   // ★ 単一指標スコア（UIの選択に従う）
   const metric = getScoreMetric();
-  const sigmas = { dist: sd(distF), time: sd(timeF), energy: sd(energyF) };
+  const sigmas = { dist: sd(distF), time: sd(timeF)};
   const score =
       metric === 'time'   ? sigmas.time
     : metric === 'energy' ? sigmas.energy
@@ -1408,23 +1404,7 @@ async function drawRoutes(){
 
 /* ===== 休憩トリガー関連 ===== */
 function logRest(msg){ $('restDebug').textContent += msg + "\n"; }
-function energyStepKJ(dist,dz,mass,flat=18){
-  return flat*(dist/1000)+Math.max(dz,0)*mass*9.80665/1000;
-}
-async function totalEnergyKJ(feature,mass,flat){
-  const coords = feature.geometry.coordinates;
-  const segs   = feature.properties.segments||[];
-  let tot=0;
-  for(const s of segs){
-    for(const st of s.steps||[]){
-      const [i0,i1]=st.way_points||[0,0];
-      const d=st.distance||0;
-      const dz = coords[i1].length>=3 ? (coords[i1][2]-coords[i0][2]) : 0;
-      tot += energyStepKJ(d,dz,mass,flat);
-    }
-  }
-  return tot;
-}
+
 /* ==========================================================
    【完全修正版】休憩トリガー生成
    ※計算結果がNaNになった地点は、リストに追加せず完全に無視します。
@@ -1583,24 +1563,20 @@ function makeRestPoints(feature) {
 }
 
 /* ===== 区間統計（各ルート） ===== */
-async function calcLegStats(feature, mass, flat){
+async function calcLegStats(feature, _unusedMass, _unusedFlat){
   const coords = feature.geometry.coordinates;
   const segs   = feature.properties.segments || [];
-  const hasEle = coords[0].length >= 3;
 
-  const legDist = [], legTime = [], legEnergy = [];
+  const legDist = [], legTime = [];
   for (const s of segs) {
     for (const step of (s.steps || [])) {
-      const [i0, i1] = step.way_points || [0, 0];
       const d  = step.distance || 0;  // m
       const t  = step.duration || 0;  // s
-      const dz = hasEle ? ((coords[i1][2] || 0) - (coords[i0][2] || 0)) : 0;
-      legDist.push(d / 1000);
-      legTime.push(t / 60);
-      legEnergy.push(energyStepKJ(d, dz, mass, flat));
+      legDist.push(d / 1000); // km
+      legTime.push(t / 60);   // min
     }
   }
-  return {dist:legDist, time:legTime, energy:legEnergy};
+  return { dist:legDist, time:legTime }; // energyなし
 }
 
 function summaryStats(arr){
@@ -2497,20 +2473,15 @@ async function routeLegStatsForWaypoints(wps, profile){
 }
 
 // ルートの累積距離[m]/時間[s]/エネルギー[kJ]を構築
-function buildCums(feature, mass=75, flat=18){
+function buildCums(feature, _unusedMass=75, _unusedFlat=18){
   const coords = feature.geometry.coordinates;
-  const hasEle = coords[0].length>=3;
   const segs   = feature.properties.segments||[];
-  const cum = { D:[0], T:[0], E:[0] };
+  const cum = { D:[0], T:[0] }; // E削除
   for(const s of segs){
     for(const st of (s.steps||[])){
-      const [i0,i1]=st.way_points||[0,0];
       const d=st.distance||0, t=st.duration||0;
-      const dz = hasEle ? ((coords[i1][2]||0)-(coords[i0][2]||0)) : 0;
-      const dE = energyStepKJ(d,dz,mass,flat);
       cum.D.push(cum.D.at(-1)+d);
       cum.T.push(cum.T.at(-1)+t);
-      cum.E.push(cum.E.at(-1)+dE);
     }
   }
   return {cum, coords};
@@ -2534,7 +2505,7 @@ function projectToRoute(lat,lon, coords, cum){
   }
   const i = best.stepIdx;
   const lerp=(arr)=>{ const v0=arr[i-1], v1=arr[i]??v0; return v0 + (v1-v0)*best.frac; };
-  return { cumD:lerp(cum.D), cumT:lerp(cum.T), cumE:lerp(cum.E), perpM: best.dist };
+  return { cumD:lerp(cum.D), cumT:lerp(cum.T), perpM: best.dist };
 }
 
 /* ===== 共通ユーティリティ：候補検査＆未採用の強制補修 ===== */
@@ -2735,48 +2706,40 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
 
   const sorted = resultList.slice().sort((a, b) => (a.score ?? 9e9) - (b.score ?? 9e9));
   
-  // 総当たり系やリスト総当たりは全件出力、それ以外はトップ3
   const isFullOutput = (
       algoCode === 'bruteforce' || algoCode === 'dbg_bf' || 
       algoCode === 'linear' || algoCode === 'dbg_linear' ||
-      algoCode === 'dbg_list_bf' // リスト総当たりも全件出す
+      algoCode === 'dbg_list_bf'
   );
   let outputList = isFullOutput ? sorted : sorted.slice(0, 3);
 
-  // 固定の理想値（事前の全体平均）
   const fixedIdeals = (typeof getIdealPerLegs === 'function') ? getIdealPerLegs() : { idealDistPerLeg: 0 };
 
   outputList.forEach((r, idx)=>{
     const rank = idx + 1;
     const stats = r.stats || { dist:[] };
     
-    // ★修正: アルゴリズムごとの「理想距離」の定義分け
     let usedIdealDist = fixedIdeals.idealDistPerLeg;
 
-    // 動的平均（そのルート自身の平均）を使うアルゴリズム群
     const usesDynamicMean = (
-        algoCode === 'dbg_list_bf' ||       // リスト総当たり
+        algoCode === 'dbg_list_bf' ||        
         algoCode === 'dbg_list_beam' ||
-        algoCode === 'dbg_bf' ||              // 総当たり
+        algoCode === 'dbg_bf' ||              
         algoCode === 'bruteforce' ||
-        algoCode.includes('rerank') ||        // 再ランク系 (calcDistMseFromFeature使用)
-        algoCode === 'dbg_beam' ||            // ビームサーチ (finalizeAndRank使用)
-        algoCode.includes('linear')           // 直線
+        algoCode.includes('rerank') ||        
+        algoCode === 'dbg_beam' ||            
+        algoCode.includes('linear')           
     );
 
     if (usesDynamicMean) {
-        // stats.dist から実測の平均を算出
         if (stats.dist && stats.dist.length > 0) {
             const sum = stats.dist.reduce((a,b)=>a+(Number(b)||0), 0);
             usedIdealDist = sum / stats.dist.length;
         }
     } 
-    // 純粋Viterbi (dbg_vit_pure) などは、探索時に固定理想値を使っているため
-    // fixedIdeals.idealDistPerLeg のままでOK
 
     const sigmaDist   = stdDev(stats.dist || []);
     const sigmaTime   = stdDev(stats.time || []);
-    const sigmaEnergy = stdDev(stats.energy || []);
 
     let poiList = (r.picks || r.picksByTrigger || []).filter(Boolean);
     if (Array.isArray(poiList[0])) poiList = poiList.flat().filter(Boolean);
@@ -2794,13 +2757,12 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
       
       sigmaDist: (typeof sigmaDist === 'number') ? sigmaDist.toFixed(4) : '',
       sigmaTime: (typeof sigmaTime === 'number') ? sigmaTime.toFixed(4) : '',
-      sigmaEnergy: (typeof sigmaEnergy === 'number') ? sigmaEnergy.toFixed(4) : '',
       
       timeMs: elapsedMs ?? 0,
       orsCalls: orsCalls ?? 0,
       overpassCalls: overpassCalls ?? 0,
       
-      idealDistKm: usedIdealDist, // ★修正した値を出力
+      idealDistKm: usedIdealDist,
 
       poiNames, poiIds, poiLatLngs
     });
@@ -2871,11 +2833,10 @@ function downloadAlgoCompareCsv(){
     'rawScore',
     'sigmaDist_km',
     'sigmaTime_min',
-    'sigmaEnergy_kJ',
     'time_ms',
     'ors_calls',
     'overpass_calls',
-    'ideal_dist_km',  // ★追加
+    'ideal_dist_km',
     'poi_names',
     'poi_ids',
     'poi_latlngs'
@@ -2890,11 +2851,10 @@ function downloadAlgoCompareCsv(){
     r.rawScore ?? '',
     r.sigmaDist ?? '',
     r.sigmaTime ?? '',
-    r.sigmaEnergy ?? '',
     r.timeMs ?? '',
     r.orsCalls ?? '',
     r.overpassCalls ?? '',
-    formatNum(r.idealDistKm, 3), // ★出力 (ここが抜けていました)
+    formatNum(r.idealDistKm, 3),
     `"${csvEscape(r.poiNames ?? '')}"`,
     `"${csvEscape(r.poiIds ?? '')}"`,
     `"${csvEscape(r.poiLatLngs ?? '')}"`
@@ -2925,7 +2885,6 @@ function renderBruteforceAllResults(results){
     const sig = {
       dist: stdDev(r.stats?.dist || []),
       time: stdDev(r.stats?.time || []),
-      energy: stdDev(r.stats?.energy || [])
     };
     const names = (r.picks || r.picksByTrigger || [])
       .filter(Boolean)
@@ -2934,7 +2893,7 @@ function renderBruteforceAllResults(results){
 
     lines.push(
       `#${rank} score=${(r.score ?? 0).toFixed(4)} raw=${(r.rawScore ?? r.score ?? 0).toFixed(4)} ` +
-      `σd=${sig.dist.toFixed(2)}km σt=${sig.time.toFixed(2)}min σE=${sig.energy.toFixed(1)}kJ`
+      `σd=${sig.dist.toFixed(2)}km σt=${sig.time.toFixed(2)}min`
     );
     lines.push(
       `   picks: ${names}`
@@ -3039,47 +2998,6 @@ function drawRestBeams() {
     });
   });
 }
-
-// ★追加：Viterbi(DP)の区間コストを「エネルギーのみ(MSE)」にする
-function legEnergyMseCost(energyKj, idealEnergyPerLeg){
-  const e  = Number(energyKj);
-  const ie = Number(idealEnergyPerLeg);
-  if (!Number.isFinite(e) || !Number.isFinite(ie)) return Infinity;
-  const de = e - ie;
-  return de * de;
-}
-
-// 2. エッジ集約 (理想距離を保持)
-function recordViterbiEdge(row){
-  if (!window.__collectViterbiEdges) return;
-  if (!window.__viterbiEdgeAgg) window.__viterbiEdgeAgg = new Map();
-
-  const fromId = row.fromId || 'unknown';
-  const toId   = row.toId   || 'unknown';
-  const key = `${fromId}|${toId}`;
-
-  const cur = window.__viterbiEdgeAgg.get(key) || {
-    fromId, toId,
-    fromName: row.fromName || '',
-    toName:   row.toName   || '',
-    count: 0,
-    sumEnergyKj: 0,
-    sumDistKm: 0,
-    sumTimeMin: 0,
-    sumCost: 0,
-    idealEnergyKj: row.idealEnergyKj,
-    // ★理想距離を保持
-    idealDistKm: (row.distKm ? (getIdealPerLegs().idealDistPerLeg) : 0)
-  };
-
-  cur.count += 1;
-  if (Number.isFinite(row.energyKj)) cur.sumEnergyKj += row.energyKj;
-  if (Number.isFinite(row.distKm))   cur.sumDistKm   += row.distKm;
-  if (Number.isFinite(row.timeMin))  cur.sumTimeMin  += row.timeMin;
-  if (Number.isFinite(row.cost))     cur.sumCost     += row.cost;
-
-  window.__viterbiEdgeAgg.set(key, cur);
-}
   
 // -------------------------------
 // bf_rank 付与用：組合せキー生成
@@ -3164,20 +3082,6 @@ function attachBfRank(resultList, bfRankMap) {
   return resultList;
 }
 
-function routeEnergyMseFromStats(stats, idealEnergyPerLeg){
-  const eArr = stats && Array.isArray(stats.energy) ? stats.energy : [];
-  const n = eArr.length;
-  if (!n) return NaN;
-
-  let sum = 0;
-  for (let i = 0; i < n; i++){
-    const ei = Number(eArr[i]);
-    const de = (Number.isFinite(ei) ? ei : 0) - idealEnergyPerLeg;
-    sum += de * de;
-  }
-  return sum / n;
-}
-
 // 【新規追加】1区間の距離コスト（MSE）: (区間距離 - 理想距離)^2
 function legDistMseCost(distKm, idealDistPerLeg){
   const d  = Number(distKm);
@@ -3231,7 +3135,6 @@ function getIdealPerLegs(){
   const cumTotals = window.__cumTotals || {};
   const totalDkm  = (Number(cumTotals.D) || 0) / 1000;
   const totalTmin = (Number(cumTotals.T) || 0) / 60;
-  const totalEkJ  = Number(cumTotals.E)  || 0;
 
   // ★修正: window.restGroups が未定義なら、グローバルの restGroups を見に行く
   const groups = (typeof restGroups !== 'undefined' ? restGroups : window.restGroups) || [];
@@ -3244,7 +3147,6 @@ function getIdealPerLegs(){
     T, R,
     idealDistPerLeg:   R > 0 ? totalDkm  / R : 0,
     idealTimePerLeg:   R > 0 ? totalTmin / R : 0,
-    idealEnergyPerLeg: R > 0 ? totalEkJ  / R : 0,
   };
 }
 
@@ -3672,14 +3574,13 @@ function downloadViterbiLogCsv() {
     return;
   }
 
-  // ★ヘッダーに Ideal_Dist_km を追加
   const header = [
     'From_ID', 'To_ID', 
     'From_Name', 'To_Name', 
-    'Dist_km', 'Time_min', 'Energy_kJ', 'Cost', 
+    'Dist_km', 'Time_min',
+    'Cost', 
     'Exec_ms', 'Status', 'Error_Msg',
-    'Ideal_Dist_km',   // ★追加
-    'Ideal_Energy_kJ'  // ★追加
+    'Ideal_Dist_km'
   ];
   
   const csvLines = [header.join(',')];
@@ -3693,13 +3594,11 @@ function downloadViterbiLogCsv() {
       esc(r.toName),
       r.distKm ?? '',
       r.timeMin ?? '',
-      r.energyKj ?? '',
       r.cost ?? '',
       r.ms ?? '',
       r.ok ? 'OK' : 'Error',
       esc(r.errMsg),
-      formatNum(r.idealDistKm, 3),   // ★値出力
-      formatNum(r.idealEnergyKj, 2)
+      formatNum(r.idealDistKm, 3)
     ];
     csvLines.push(line.join(','));
   });
@@ -3715,7 +3614,6 @@ function downloadViterbiLogCsv() {
   a.click();
   document.body.removeChild(a);
 }
-
 /* ==============================================
    手動ルート比較機能（強力版）
    ============================================== */
@@ -5176,6 +5074,7 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
 
 
 
