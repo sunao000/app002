@@ -3035,7 +3035,6 @@ function renderViterbiLog() {
   panel.textContent = [header, ...lines].join('\n');
 }
 
-// ViterbiログCSV
 function downloadViterbiLogCsv() {
   const rows = window.__viterbiAllEdgeRows || [];
   if (!rows.length) {
@@ -3046,8 +3045,13 @@ function downloadViterbiLogCsv() {
   const header = [
     'From_ID', 'To_ID', 
     'From_Name', 'To_Name', 
-    'Dist_km', 'Time_min', 'Cost', 
-    'Exec_ms', 'Status', 'Error_Msg'
+    'Dist_km', 
+    'Ideal_Dist_km',
+    'Leg_MSE',
+    'Time_min', 
+    'Exec_ms', 
+    'Status', 
+    'Error_Msg'
   ];
   
   const csvLines = [header.join(',')];
@@ -3060,8 +3064,9 @@ function downloadViterbiLogCsv() {
       esc(r.fromName),
       esc(r.toName),
       r.distKm ?? '',
-      r.timeMin ?? '',
+      r.idealDistKm ?? '',
       r.cost ?? '',
+      r.timeMin ?? '',
       r.ms ?? '',
       r.ok ? 'OK' : 'Error',
       esc(r.errMsg)
@@ -4314,4 +4319,5 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
 
