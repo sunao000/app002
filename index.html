@@ -234,8 +234,8 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
   <label><input type="checkbox" id="dbg_bf" checked> 1. 総当たり (Ground Truth)</label>
   <label><input type="checkbox" id="dbg_vit_pure" checked> 2. 純粋Viterbi (高速)</label>
   <label><input type="checkbox" id="dbg_vit_pure_rerank" checked> 3. 純粋Viterbi + 再ランク</label>
-  <label><input type="checkbox" id="dbg_matrix_bf" checked> 4. マトリックス総当たり (推奨)</label>
-  <label><input type="checkbox" id="dbg_matrix_beam"> 5. マトリックスビーム (大規模用)</label>
+  <label><input type="checkbox" id="dbg_list_bf" checked> 4. リスト総当たり (推奨)</label>
+  <label><input type="checkbox" id="dbg_list_beam"> 5. リストビーム (大規模用)</label>
 </div>
 
 <!-- サマリー -->
@@ -2739,11 +2739,11 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
 
   const sorted = resultList.slice().sort((a, b) => (a.score ?? 9e9) - (b.score ?? 9e9));
   
-  // 総当たり系やマトリックス総当たりは全件出力、それ以外はトップ3
+  // 総当たり系やリスト総当たりは全件出力、それ以外はトップ3
   const isFullOutput = (
       algoCode === 'bruteforce' || algoCode === 'dbg_bf' || 
       algoCode === 'linear' || algoCode === 'dbg_linear' ||
-      algoCode === 'dbg_matrix_bf' // マトリックス総当たりも全件出す
+      algoCode === 'dbg_list_bf' // リスト総当たりも全件出す
   );
   let outputList = isFullOutput ? sorted : sorted.slice(0, 3);
 
@@ -2759,8 +2759,8 @@ function pushAlgoResultsForCsv(algoCode, label, resultList, elapsedMs, orsCalls,
 
     // 動的平均（そのルート自身の平均）を使うアルゴリズム群
     const usesDynamicMean = (
-        algoCode === 'dbg_matrix_bf' ||       // マトリックス総当たり
-        algoCode === 'dbg_matrix_beam' ||
+        algoCode === 'dbg_list_bf' ||       // リスト総当たり
+        algoCode === 'dbg_list_beam' ||
         algoCode === 'dbg_bf' ||              // 総当たり
         algoCode === 'bruteforce' ||
         algoCode.includes('rerank') ||        // 再ランク系 (calcDistMseFromFeature使用)
@@ -4364,11 +4364,11 @@ async function solveViterbiGeneric(start, goal, groups, profile, options = {}) {
 }
 
 /* ==========================================================
-   【完全計測版】マトリックス総当たり
+   【完全計測版】リスト総当たり
    適当な固定値を使わず、フェーズごとの実測値を用いて
    理論上の合計時間を算出します。
    ========================================================== */
-async function solveMatrixBruteforce(start, goal, restGroups, profile, onProgress) {
+async function solvelistBruteforce(start, goal, restGroups, profile, onProgress) {
     const T = Array.isArray(restGroups) ? restGroups.length : 0;
     if (!T) return [];
 
@@ -4385,14 +4385,14 @@ async function solveMatrixBruteforce(start, goal, restGroups, profile, onProgres
         [goal]
     ];
 
-    const edgeMatrix = []; 
+    const edgelist = []; 
     let totalEdges = 0;
     for(let i=0; i<layers.length-1; i++) {
         totalEdges += layers[i].length * layers[i+1].length;
     }
 
     if (totalEdges === 0) {
-        console.warn("[MatrixBF] Edge count is 0.");
+        console.warn("[listBF] Edge count is 0.");
         return [];
     }
 
@@ -4402,12 +4402,12 @@ async function solveMatrixBruteforce(start, goal, restGroups, profile, onProgres
 
     // --- [Phase 1] データ収集 ---
     for (let i = 0; i < layers.length - 1; i++) {
-        edgeMatrix[i] = [];
+        edgelist[i] = [];
         const froms = layers[i];
         const tos   = layers[i+1];
 
         for (let f = 0; f < froms.length; f++) {
-            edgeMatrix[i][f] = [];
+            edgelist[i][f] = [];
             for (let t = 0; t < tos.length; t++) {
                 if (onProgress) onProgress(computedEdges, totalEdges);
                 
@@ -4419,14 +4419,14 @@ async function solveMatrixBruteforce(start, goal, restGroups, profile, onProgres
                     const cost = leg._costMs || 0;
                     totalApiCostMs += cost;
 
-                    edgeMatrix[i][f][t] = {
+                    edgelist[i][f][t] = {
                         dist: leg.distKm,
                         time: leg.timeMin,
                         energy: leg.energyKj,
                         valid: true
                     };
                 } catch (e) {
-                    edgeMatrix[i][f][t] = { valid: false };
+                    edgelist[i][f][t] = { valid: false };
                 }
                 computedEdges++;
             }
@@ -4474,7 +4474,7 @@ async function solveMatrixBruteforce(start, goal, restGroups, profile, onProgres
         const nextCandidates = layers[nextLayerIdx];
 
         for (let nextIdx = 0; nextIdx < nextCandidates.length; nextIdx++) {
-            const edge = edgeMatrix[layerIdx][currentIdx][nextIdx];
+            const edge = edgelist[layerIdx][currentIdx][nextIdx];
             if (edge && edge.valid) {
                 const nextStats = {
                     dist: [...accStats.dist, edge.dist],
@@ -4528,11 +4528,11 @@ async function solveMatrixBruteforce(start, goal, restGroups, profile, onProgres
 }
 
 /* ==========================================================
-   【新規】マトリックスビーム (大規模探索対応)
+   【新規】リストビーム (大規模探索対応)
    Phase 1: APIでエッジデータを収集 (総当たりと共有)
    Phase 2: ビームサーチでメモリを節約しつつ良質な解を探索
    ========================================================== */
-async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
+async function solvelistBeam(start, goal, restGroups, profile, onProgress) {
     const T = Array.isArray(restGroups) ? restGroups.length : 0;
     if (!T) return [];
 
@@ -4542,7 +4542,7 @@ async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
 
     const tStart = performance.now();
 
-    // --- [Phase 1] データ収集 (マトリックス総当たりと同じ) ---
+    // --- [Phase 1] データ収集 (リスト総当たりと同じ) ---
     const layers = [
         [start],
         ...restGroups.map(g => {
@@ -4553,12 +4553,12 @@ async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
         [goal]
     ];
 
-    const edgeMatrix = []; 
+    const edgelist = []; 
     let totalEdges = 0;
     for(let i=0; i<layers.length-1; i++) totalEdges += layers[i].length * layers[i+1].length;
 
     if (totalEdges === 0) {
-        console.warn("[MatrixBeam] Edge count is 0.");
+        console.warn("[listBeam] Edge count is 0.");
         return [];
     }
 
@@ -4567,12 +4567,12 @@ async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
     const apiFunc = calcLegCostWithApi;
 
     for (let i = 0; i < layers.length - 1; i++) {
-        edgeMatrix[i] = [];
+        edgelist[i] = [];
         const froms = layers[i];
         const tos   = layers[i+1];
 
         for (let f = 0; f < froms.length; f++) {
-            edgeMatrix[i][f] = [];
+            edgelist[i][f] = [];
             for (let t = 0; t < tos.length; t++) {
                 if (onProgress) onProgress(computedEdges, totalEdges);
                 try {
@@ -4580,14 +4580,14 @@ async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
                     const leg = await apiFunc(froms[f], tos[t], profile);
                     totalApiCostMs += (leg._costMs || 0);
 
-                    edgeMatrix[i][f][t] = {
+                    edgelist[i][f][t] = {
                         dist: leg.distKm,
                         time: leg.timeMin,
                         energy: leg.energyKj,
                         valid: true
                     };
                 } catch (e) {
-                    edgeMatrix[i][f][t] = { valid: false };
+                    edgelist[i][f][t] = { valid: false };
                 }
                 computedEdges++;
             }
@@ -4617,7 +4617,7 @@ async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
             const nextLayerLen = layers[i+1].length;
 
             for (let nextIdx = 0; nextIdx < nextLayerLen; nextIdx++) {
-                const edge = edgeMatrix[i][currentIdx][nextIdx];
+                const edge = edgelist[i][currentIdx][nextIdx];
                 if (!edge || !edge.valid) continue;
 
                 // 統計情報を更新
@@ -4799,18 +4799,18 @@ const ALGO_CONFIG = [
     }) 
   },
 
-  // 4. マトリックス総当たり (キャッシュ効率最大・推奨)
+  // 4. リスト総当たり (キャッシュ効率最大・推奨)
   { 
-    id: 'dbg_matrix_bf', 
-    label: '4. マトリックス総当たり (推奨)', 
-    func: (s,g,gr,p, cb) => solveMatrixBruteforce(s,g,gr,p, cb)
+    id: 'dbg_list_bf', 
+    label: '4. リスト総当たり (推奨)', 
+    func: (s,g,gr,p, cb) => solvelistBruteforce(s,g,gr,p, cb)
   },
 
-  // 5. マトリックスビーム (大規模探索・高速化版)
+  // 5. リストビーム (大規模探索・高速化版)
   { 
-    id: 'dbg_matrix_beam', 
-    label: '5. マトリックスビーム (大規模用)', 
-    func: (s,g,gr,p,cb) => solveMatrixBeam(s,g,gr,p,cb) 
+    id: 'dbg_list_beam', 
+    label: '5. リストビーム (大規模用)', 
+    func: (s,g,gr,p,cb) => solvelistBeam(s,g,gr,p,cb) 
   },
 ];
   
@@ -5189,5 +5189,6 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
 
 
