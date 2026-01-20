@@ -2861,7 +2861,7 @@ function downloadAlgoCompareCsv(){
   const blob = buildCsvBlob(header, bodyRows);
   downloadBlob(blob, 'algo_compare_debug.csv');
 }
-
+  
 function renderBruteforceAllResults(results){
   const box = $('bruteforceAllList');
   const btn = $('btnDownloadBruteforceCsv');
@@ -2914,7 +2914,6 @@ function downloadBruteforceCsv(){
     'rawScore',
     'sigmaDist_km',
     'sigmaTime_min',
-    'sigmaEnergy_kJ',
     'poi_names'
   ];
 
@@ -2924,7 +2923,6 @@ function downloadBruteforceCsv(){
     const sig = {
       dist: stdDev(r.stats?.dist || []),
       time: stdDev(r.stats?.time || []),
-      energy: stdDev(r.stats?.energy || [])
     };
 
     const names = (r.picks || r.picksByTrigger || [])
@@ -2938,7 +2936,6 @@ function downloadBruteforceCsv(){
       r.rawScore ?? '',
       sig.dist.toFixed(3),
       sig.time.toFixed(3),
-      sig.energy.toFixed(3),
       `"${csvEscape(names)}"`
     ];
   });
@@ -2946,7 +2943,7 @@ function downloadBruteforceCsv(){
   const blob = buildCsvBlob(header, bodyRows);
   downloadBlob(blob, 'bruteforce_all_combos.csv');
 }
-
+  
 // トリガー ↔ POI のビームを全部消す
 function clearRestBeams() {
   if (restBeamLayer) {
@@ -3568,7 +3565,7 @@ function renderViterbiLog() {
 function downloadViterbiLogCsv() {
   const rows = window.__viterbiAllEdgeRows || [];
   if (!rows.length) {
-    alert('ダウンロードするデータがありません。');
+    alert('ダウンロードするデータがありません。先にアルゴリズムを実行してください。');
     return;
   }
 
@@ -3577,7 +3574,8 @@ function downloadViterbiLogCsv() {
     'From_Name', 'To_Name', 
     'Dist_km', 'Time_min',
     'Cost', 
-    'Exec_ms', 'Status', 'Error_Msg'
+    'Exec_ms', 'Status', 'Error_Msg',
+    'Ideal_Dist_km'
   ];
   
   const csvLines = [header.join(',')];
@@ -3594,7 +3592,8 @@ function downloadViterbiLogCsv() {
       r.cost ?? '',
       r.ms ?? '',
       r.ok ? 'OK' : 'Error',
-      esc(r.errMsg)
+      esc(r.errMsg),
+      formatNum(r.idealDistKm, 3)
     ];
     csvLines.push(line.join(','));
   });
@@ -3778,6 +3777,7 @@ window.drawManualComparison = async function() {
              const leg = await calcLegCostWithApi(from, to, profile);
              const d = leg.distKm   ?? leg.dist_km   ?? leg.dist    ?? 0;
              const t = leg.timeMin  ?? leg.time_min  ?? leg.time    ?? 0;
+             // energy 削除
 
              legRes = { dist: safeNum(d), time: safeNum(t) };
 
@@ -4996,9 +4996,3 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
-
-
-
-
-
-
