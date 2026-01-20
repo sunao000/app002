@@ -94,24 +94,6 @@ button.del{background:#d9534f;color:#fff;border:none;border-radius:4px;padding:0
       </div>
     </div>
 
-    <div style="margin-top:10px; padding-top:6px; border-top:1px dashed #ccc;">
-      <div style="font-weight:bold; color:#555; margin-bottom:4px;">2. 追加トリガー:</div>
-      
-      <div style="margin-bottom:4px;">
-        <label><input type="checkbox" id="optPercentTrigger"> 割合(%) </label>
-        <input id="percentStep" type="number" value="25" style="width:40px;"> %ごと
-        <select id="percentMetric" style="font-size:0.9em;">
-          <option value="distance" selected>距離</option>
-          <option value="time">時間</option>
-        </select>
-      </div>
-
-      <div>
-        <label><input type="checkbox" id="optStatTrigger"> 統計分布 </label>
-        <span style="font-size:0.85em; color:#666;">(平均<input id="statMean" type="number" value="20" style="width:30px;">km)</span>
-      </div>
-    </div>
-
     <div style="margin-top:12px; padding-top:8px; border-top:1px solid #eee;">
       検索半径: <input type="number" id="searchRadius" value="500" style="width:50px;"> m <br>
       POI件数上限: <input type="number" id="poiLimit" value="5" style="width:40px;"> 件/箇所
@@ -1407,11 +1389,9 @@ function logRest(msg){ $('restDebug').textContent += msg + "\n"; }
    【完全修正版】休憩トリガー生成
    ※計算結果がNaNになった地点は、リストに追加せず完全に無視します。
    ========================================================== */
-// async, mass, flat を削除してシンプルに
 function makeRestPoints(feature) {
   const coords = feature.geometry.coordinates;
   const totalD = feature.properties.summary.distance || 0; 
-  // ★削除: const totalE = await totalEnergyKJ(feature, mass, flat); 
 
   // 1. 累積距離の計算
   const cumDist = [0];
@@ -1460,32 +1440,6 @@ function makeRestPoints(feature) {
         triggerDistancesM.push(legM * i);
       }
     }
-  }
-
-  // 3. 追加トリガー
-  if (document.getElementById('optPercentTrigger')?.checked) {
-    const step = parseFloat(document.getElementById('percentStep').value) || 25;
-    let added = 0;
-    for (let p = step; p < 100; p += step) {
-      const ratio = p / 100.0;
-      let targetM = totalD * ratio;
-      if (targetM > 500 && targetM < totalD - 500) {
-        triggerDistancesM.push(targetM);
-        added++;
-      }
-    }
-    if(added > 0) logRest(`[追加] 割合トリガー (${step}%) → +${added}箇所`);
-  }
-
-  if (document.getElementById('optStatTrigger')?.checked) {
-    const meanKm = parseFloat(document.getElementById('statMean').value) || 20;
-    const meanM = meanKm * 1000;
-    let added = 0;
-    for (let d = meanM; d < totalD - 500; d += meanM) {
-      triggerDistancesM.push(d);
-      added++;
-    }
-    if(added > 0) logRest(`[追加] 統計トリガー (平均${meanKm}km) → +${added}箇所`);
   }
 
   triggerDistancesM.sort((a, b) => a - b);
@@ -1574,7 +1528,7 @@ async function calcLegStats(feature, _unusedMass, _unusedFlat){
       legTime.push(t / 60);   // min
     }
   }
-  return { dist:legDist, time:legTime }; // energyなし
+  return { dist:legDist, time:legTime };
 }
 
 function summaryStats(arr){
@@ -4996,3 +4950,4 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
