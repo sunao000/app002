@@ -4537,8 +4537,8 @@ async function solveMatrixBeam(start, goal, restGroups, profile, onProgress) {
     if (!T) return [];
 
     // 設定: ビーム幅（この数だけ経路を残しながら進む）
-    // 2000あれば、総当たりとほぼ変わらない精度が出ます
-    const BEAM_WIDTH = 2000; 
+    // 5^8 = 390,625
+    const BEAM_WIDTH = Math.pow(5, 8); 
 
     const tStart = performance.now();
 
@@ -5189,3 +5189,4 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
