@@ -2391,9 +2391,14 @@ function downloadBruteforceCsv(){
   }
 
   const header = [
-    'rank', 'score', 'rawScore',
-    'sigmaDist_km', 'sigmaTime_min',
-    'poi_names'
+    'rank', 
+    'mse_score',
+    'raw_score',
+    'sigma_dist_km', 
+    'sigma_time_min',
+    'poi_names',
+    'poi_ids',
+    'poi_latlngs'
   ];
 
   const bodyRows = rows.map((r, idx) => {
@@ -2402,10 +2407,19 @@ function downloadBruteforceCsv(){
       dist: stdDev(r.stats?.dist || []),
       time: stdDev(r.stats?.time || []),
     };
-    const names = (r.picks || r.picksByTrigger || [])
-      .filter(Boolean)
-      .map(p => p.name || 'POI')
-      .join(' -> ');
+    
+    // POIリストを取得
+    const picks = (r.picks || r.picksByTrigger || []).filter(Boolean);
+    
+    // データ生成
+    const names = picks.map(p => p.name || 'POI').join(' -> ');
+    
+    // ID生成 (getPoiId関数があれば使い、なければ座標で代用)
+    const ids = (typeof getPoiId === 'function') 
+      ? picks.map(p => getPoiId(p)).join(' -> ')
+      : picks.map(p => `${(p.lat||0).toFixed(5)},${(p.lon||0).toFixed(5)}`).join(' -> ');
+
+    const latlngs = picks.map(p => `${p.lat},${p.lon}`).join(' | ');
 
     return [
       rank,
@@ -2413,7 +2427,9 @@ function downloadBruteforceCsv(){
       r.rawScore ?? '',
       sig.dist.toFixed(3),
       sig.time.toFixed(3),
-      `"${csvEscape(names)}"`
+      `"${csvEscape(names)}"`,
+      `"${csvEscape(ids)}"`,
+      `"${csvEscape(latlngs)}"`
     ];
   });
 
@@ -4319,5 +4335,6 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
 
 
