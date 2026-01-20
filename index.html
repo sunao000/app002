@@ -434,9 +434,11 @@ function comboScore(legStats){
 }
 
 // picksByTrigger（各トリガーの選択）を累積から評価（ゼロAPI）
+// 修正版：evalByCums
 function evalByCums(restGroups, picksByTrigger, cumTotals){
   const totalD = Number(cumTotals?.D) || 0;   // m
   const totalT = Number(cumTotals?.T) || 0;   // s
+  // totalE 削除
 
   // 休憩分割による「区切り」を累積距離で作る
   const cuts = [0];
@@ -456,7 +458,7 @@ function evalByCums(restGroups, picksByTrigger, cumTotals){
     }
   }
 
-  // 区間時間/エネルギーは距離比分配（総量が0なら均等割）
+  // 区間時間
   const time = [];
   if (dist.length){
     if (totalD > 0 && Number.isFinite(totalD)){
@@ -466,14 +468,13 @@ function evalByCums(restGroups, picksByTrigger, cumTotals){
       }
     } else {
       const eqT = (totalT/60) / dist.length;
-      const eqE = (totalE) / dist.length;
-      for (let i=0;i<dist.length;i++){ time.push(eqT||0); energy.push(eqE||0); }
+      for (let i=0;i<dist.length;i++){ time.push(eqT||0); }
     }
   }
 
   // 安全化
   const finite = a => a.filter(x => Number.isFinite(x));
-  const distF = finite(dist), timeF = finite(time), energyF = finite(energy);
+  const distF = finite(dist), timeF = finite(time);
 
   // 標準偏差
   const sd = (a) => {
@@ -483,15 +484,12 @@ function evalByCums(restGroups, picksByTrigger, cumTotals){
     return Math.sqrt(v);
   };
 
-  // ★ 単一指標スコア（UIの選択に従う）
+  // ★ 単一指標スコア
   const metric = getScoreMetric();
-  const sigmas = { dist: sd(distF), time: sd(timeF)};
-  const score =
-      metric === 'time'   ? sigmas.time
-    : metric === 'energy' ? sigmas.energy
-    :                       sigmas.dist;   // default: distance
+  const sigmas = { dist: sd(distF), time: sd(timeF) };
+  const score = (metric === 'time') ? sigmas.time : sigmas.dist; 
 
-  return { stats: { dist: distF, time: timeF, energy: energyF }, score, sigma: sigmas };
+  return { stats: { dist: distF, time: timeF }, score, sigma: sigmas };
 }
 
  /* ===== スコア指標（distance|time|energy） ===== */
@@ -3143,7 +3141,7 @@ function getIdealPerLegs(){
   const R = T + 1;
 
   return {
-    totalDkm, totalTmin, totalEkJ,
+    totalDkm, totalTmin,
     T, R,
     idealDistPerLeg:   R > 0 ? totalDkm  / R : 0,
     idealTimePerLeg:   R > 0 ? totalTmin / R : 0,
@@ -3570,7 +3568,7 @@ function renderViterbiLog() {
 function downloadViterbiLogCsv() {
   const rows = window.__viterbiAllEdgeRows || [];
   if (!rows.length) {
-    alert('ダウンロードするデータがありません。先にアルゴリズムを実行してください。');
+    alert('ダウンロードするデータがありません。');
     return;
   }
 
@@ -3579,8 +3577,7 @@ function downloadViterbiLogCsv() {
     'From_Name', 'To_Name', 
     'Dist_km', 'Time_min',
     'Cost', 
-    'Exec_ms', 'Status', 'Error_Msg',
-    'Ideal_Dist_km'
+    'Exec_ms', 'Status', 'Error_Msg'
   ];
   
   const csvLines = [header.join(',')];
@@ -3597,8 +3594,7 @@ function downloadViterbiLogCsv() {
       r.cost ?? '',
       r.ms ?? '',
       r.ok ? 'OK' : 'Error',
-      esc(r.errMsg),
-      formatNum(r.idealDistKm, 3)
+      esc(r.errMsg)
     ];
     csvLines.push(line.join(','));
   });
@@ -3696,29 +3692,9 @@ window.drawManualComparison = async function() {
   const btn = document.getElementById('btnDrawManualRoute');
   const profile = document.getElementById('profileSelect')?.value || 'cycling-road'; 
 
-  // 数値を安全に取り出すヘルパー
   const safeNum = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
-  };
-
-  // 物理計算ヘルパー（区間用）
-  const calcSegEnergy = (seg, mass=75, flat=18) => {
-    let e = 0;
-    const steps = seg.steps || [];
-    // 簡易的に高さを取得するのは難しいので、flat係数のみで近似するか、
-    // もしStepsにelevation情報がなければ距離ベースにする。
-    // ここでは、全体の統一性を保つため「距離係数」だけで簡易比較する安全策をとるか、
-    // あるいは `energyStepKJ` が使えるなら使う。
-    // ※今回は比較用なので、正確性より「一括と分割の差」を見るために
-    //   同じロジック(energyStepKJ)を通すように努力する。
-    steps.forEach(st => {
-       const d = st.distance || 0;
-       // height情報は coordinates から取る必要があるが、ここではstepごとのdzが不明なことが多い。
-       // そのため「平地換算」として計算する（ズレの原因特定には十分）
-       e += flat * (d/1000); 
-    });
-    return e;
   };
 
   if (btn) {
@@ -3728,7 +3704,6 @@ window.drawManualComparison = async function() {
   if (infoBox) infoBox.textContent = '準備中...';
 
   try {
-    // 1. データチェック
     let groups = [];
     if (typeof getGlobalRestGroups === 'function') groups = getGlobalRestGroups();
     else if (typeof restGroups !== 'undefined') groups = restGroups;
@@ -3741,7 +3716,6 @@ window.drawManualComparison = async function() {
     const goal = pts.find(p => p.type === 'goal') || pts[pts.length - 1];
     if (!start || !goal) throw new Error('スタートまたはゴール地点が設定されていません');
 
-    // 2. UI回収
     const picks = [];
     for (let i = 0; i < groups.length; i++) {
       const sel = document.getElementById(`manualSel_${i}`);
@@ -3751,7 +3725,6 @@ window.drawManualComparison = async function() {
       picks.push(p);
     }
 
-    // 3. 地図リセット
     if (typeof clearRouteLayers === 'function') clearRouteLayers();
     if (typeof markerLayer !== 'undefined') markerLayer.clearLayers();
     if (typeof clearRestBeams === 'function') clearRestBeams();
@@ -3761,14 +3734,11 @@ window.drawManualComparison = async function() {
       manualRouteLayerGroup.clearLayers();
     }
 
-    // 4. API計算
     if (btn) btn.textContent = 'ルート計算中...';
     
     const showBatch = document.getElementById('chkManBatch')?.checked;
     const showSeg   = document.getElementById('chkManSeg')?.checked;
     
-    // 詳細比較用の配列
-    // { dist(km), time(min), energy(kJ) }
     const batchLegs = [];
     const segLegs   = [];
 
@@ -3782,41 +3752,12 @@ window.drawManualComparison = async function() {
           style: { color: '#0055aa', weight: 8, opacity: 0.6 }
         }).bindTooltip("一括ルート").addTo(manualRouteLayerGroup);
         
-        // セグメント（区間）ごとのデータを抽出
         const segments = out.feature.properties.segments || [];
         
-        // stats.energy は「ステップごと」の配列なので、区間に切り分けるのは難しい。
-        // ここでは segments 情報から距離と時間を、エネルギーは全体の比率等で簡易配分するか
-        // もしくは「距離ベースの簡易エネルギー」で比較する。
-        // ★正確を期すため、stats.energy（累積）を使って区間差分をとる
-        
-        let processedSteps = 0;
-        let prevCumE = 0;
-        
         segments.forEach((seg, idx) => {
-           // このセグメントに含まれるステップ数
-           const stepCount = (seg.steps || []).length;
-           
-           // stats.energy からこの区間の終了地点の値を取得
-           // (stats.energyは累積配列と仮定)
-           let currentLegE = 0;
-           if (out.stats && Array.isArray(out.stats.energy) && out.stats.energy.length > 0) {
-               // 区間エネルギー = (区間終わりの累積E) - (区間始まりの累積E)
-               // stats.energyのインデックスは全ステップ通し番号
-               const endIndex = Math.min(processedSteps + stepCount - 1, out.stats.energy.length - 1);
-               const cumAtEnd = safeNum(out.stats.energy[endIndex]);
-               currentLegE = cumAtEnd - prevCumE;
-               prevCumE = cumAtEnd;
-               processedSteps += stepCount;
-           } else {
-               // statsがない場合は簡易計算
-               currentLegE = calcSegEnergy(seg);
-           }
-
            batchLegs.push({
                dist: safeNum(seg.distance) / 1000,
-               time: safeNum(seg.duration) / 60,
-               energy: currentLegE
+               time: safeNum(seg.duration) / 60
            });
         });
       }
@@ -3830,16 +3771,15 @@ window.drawManualComparison = async function() {
         const from = points[i];
         const to = points[i+1];
         
-        let legRes = { dist:0, time:0, energy:0 };
+        let legRes = { dist:0, time:0 };
 
         try {
           if (typeof calcLegCostWithApi === 'function') {
              const leg = await calcLegCostWithApi(from, to, profile);
-             const e = leg.energyKj ?? leg.energy_kJ ?? leg.energy ?? 0;
-             const d = leg.distKm   ?? leg.dist_km   ?? leg.dist   ?? 0;
-             const t = leg.timeMin  ?? leg.time_min  ?? leg.time   ?? 0;
+             const d = leg.distKm   ?? leg.dist_km   ?? leg.dist    ?? 0;
+             const t = leg.timeMin  ?? leg.time_min  ?? leg.time    ?? 0;
 
-             legRes = { dist: safeNum(d), time: safeNum(t), energy: safeNum(e) };
+             legRes = { dist: safeNum(d), time: safeNum(t) };
 
              // 描画
              const res = await dir({ coordinates: [[from.lon, from.lat], [to.lon, to.lat]], elevation:true }, profile);
@@ -3857,12 +3797,11 @@ window.drawManualComparison = async function() {
 
     // 5. 結果表示 (HTML生成)
     const fmt = (n, d=1) => safeNum(n).toFixed(d);
-    // 差分が0.1以上なら赤くする
     const diffColor = (a, b) => (Math.abs(safeNum(a) - safeNum(b)) > 0.1) ? '#d00' : '#888';
     
     // 合計計算
-    const sumBatch = batchLegs.reduce((a,b)=>({dist:a.dist+b.dist, time:a.time+b.time, energy:a.energy+b.energy}), {dist:0,time:0,energy:0});
-    const sumSeg   = segLegs.reduce((a,b)=>({dist:a.dist+b.dist, time:a.time+b.time, energy:a.energy+b.energy}), {dist:0,time:0,energy:0});
+    const sumBatch = batchLegs.reduce((a,b)=>({dist:a.dist+b.dist, time:a.time+b.time}), {dist:0,time:0});
+    const sumSeg   = segLegs.reduce((a,b)=>({dist:a.dist+b.dist, time:a.time+b.time}), {dist:0,time:0});
 
     let html = '<div style="font-size:0.9rem; line-height:1.4;">';
 
@@ -3874,8 +3813,7 @@ window.drawManualComparison = async function() {
       <div style="padding:6px; border:1px solid #0055aa; border-radius:4px; background:#f0f8ff;">
         <div style="font-weight:bold; color:#0055aa; border-bottom:1px solid #cceeff; margin-bottom:4px;">■ 一括 (Total)</div>
         D: ${fmt(sumBatch.dist, 2)} km<br>
-        T: ${fmt(sumBatch.time, 1)} min<br>
-        E: <b>${fmt(sumBatch.energy, 0)} kJ</b>
+        T: ${fmt(sumBatch.time, 1)} min
       </div>`;
     }
     if (showSeg) {
@@ -3883,8 +3821,7 @@ window.drawManualComparison = async function() {
       <div style="padding:6px; border:1px solid #aa0000; border-radius:4px; background:#fff5f5;">
         <div style="font-weight:bold; color:#aa0000; border-bottom:1px solid #ffcccc; margin-bottom:4px;">■ 積上 (Total)</div>
         D: ${fmt(sumSeg.dist, 2)} km<br>
-        T: ${fmt(sumSeg.time, 1)} min<br>
-        E: <b>${fmt(sumSeg.energy, 0)} kJ</b>
+        T: ${fmt(sumSeg.time, 1)} min
       </div>`;
     }
     html += '</div>';
@@ -3902,15 +3839,13 @@ window.drawManualComparison = async function() {
 
         const maxLen = Math.max(batchLegs.length, segLegs.length);
         for(let i=0; i<maxLen; i++){
-            const b = batchLegs[i] || {dist:0, time:0, energy:0};
-            const s = segLegs[i]   || {dist:0, time:0, energy:0};
-            const label = (i===0) ? 'Start' : (i===maxLen-1 ? 'Goal' : `POI ${i}`);
-            const nextLabel = (i===maxLen-1) ? '' : (i===maxLen-2 ? 'Goal' : `POI ${i+1}`);
+            const b = batchLegs[i] || {dist:0, time:0};
+            const s = segLegs[i]   || {dist:0, time:0};
             
             // 距離行
             html += `
             <tr>
-              <td rowspan="3" style="border:1px solid #ddd; text-align:center; vertical-align:middle; background:#fafafa;">
+              <td rowspan="2" style="border:1px solid #ddd; text-align:center; vertical-align:middle; background:#fafafa;">
                 <b>Leg ${i+1}</b>
               </td>
               <td style="border:1px solid #ddd; padding:2px;">距離</td>
@@ -3922,22 +3857,12 @@ window.drawManualComparison = async function() {
             </tr>`;
             // 時間行
             html += `
-            <tr>
+            <tr style="border-bottom:2px solid #ccc;">
               <td style="border:1px solid #ddd; padding:2px;">時間</td>
               <td style="border:1px solid #ddd; padding:2px; text-align:right;">${fmt(b.time,1)}</td>
               <td style="border:1px solid #ddd; padding:2px; text-align:right;">${fmt(s.time,1)}</td>
               <td style="border:1px solid #ddd; padding:2px; text-align:right; color:${diffColor(s.time, b.time)}">
                 ${fmt(s.time - b.time, 1)}
-              </td>
-            </tr>`;
-            // エネルギー行
-            html += `
-            <tr style="border-bottom:2px solid #ccc;">
-              <td style="border:1px solid #ddd; padding:2px;">En(kJ)</td>
-              <td style="border:1px solid #ddd; padding:2px; text-align:right;"><b>${fmt(b.energy,0)}</b></td>
-              <td style="border:1px solid #ddd; padding:2px; text-align:right;"><b>${fmt(s.energy,0)}</b></td>
-              <td style="border:1px solid #ddd; padding:2px; text-align:right; font-weight:bold; color:${diffColor(s.energy, b.energy)}">
-                ${fmt(s.energy - b.energy, 0)}
               </td>
             </tr>`;
         }
@@ -3947,7 +3872,6 @@ window.drawManualComparison = async function() {
     html += '</div>';
     if (infoBox) infoBox.innerHTML = html;
 
-    // マーカー・ズーム
     if (typeof setComboMarkers === 'function') setComboMarkers(start, picks, goal);
     if (typeof map !== 'undefined') {
        const allLayers = [];
@@ -3971,7 +3895,6 @@ window.drawManualComparison = async function() {
     }
   }
 };
-
 /* =====================================================================
    【アルゴリズム比較・統合版 (7種盛り)】
    評価基準：すべて「距離のばらつき（MSE）」で統一
@@ -4980,7 +4903,6 @@ async function calcLegCostWithApi(from, to, profile){
         fromId, toId, fromName, toName,
         fromLat, fromLon, toLat, toLon,
         distKm, timeMin, 
-        // energyKj 削除
         profile,
         ms: elapsedMs, // 確定した時間を使用
         ok: true,
@@ -5074,6 +4996,7 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
 
 
 
