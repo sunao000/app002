@@ -2776,8 +2776,6 @@ function formatNum(x, digits=3){
   return n.toFixed(digits);
 }
 
-// 古い関数名で呼んでいる場合の互換性維持
-window.downloadViterbiLogCsv = downloadViterbiEdgesCsv;
 function bindViterbiEdgeUi(){
   const btnShow = document.getElementById('btnShowViterbiEdges');
   const btnHide = document.getElementById('btnHideViterbiEdges');
@@ -4275,3 +4273,4 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
