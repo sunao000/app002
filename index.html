@@ -3012,7 +3012,7 @@ function updateManualRouteUI() {
 /* ==============================================
    【改良版】手動ルート比較機能（分散・標準偏差の表示追加）
    ============================================== */
-// 【改造版】プランA vs プランB 比較実行
+// 【修正版】プランA vs プランB 比較実行 (getBoundsエラー修正済み)
 window.drawManualComparison = async function() {
   console.log('[ManualRoute] Compare A/B Start');
   const infoBox = document.getElementById('manualRouteInfo');
@@ -3029,8 +3029,10 @@ window.drawManualComparison = async function() {
   if (typeof clearRouteLayers === 'function') clearRouteLayers();
   if (typeof markerLayer !== 'undefined') markerLayer.clearLayers();
   if (typeof clearRestBeams === 'function') clearRestBeams();
+
+  // ★★★ 修正箇所: L.layerGroup() ではなく L.featureGroup() を使う ★★★
   if (typeof manualRouteLayerGroup === 'undefined' || manualRouteLayerGroup === null) {
-    manualRouteLayerGroup = L.layerGroup().addTo(map);
+    manualRouteLayerGroup = L.featureGroup().addTo(map); 
   } else {
     manualRouteLayerGroup.clearLayers();
   }
@@ -3056,8 +3058,6 @@ window.drawManualComparison = async function() {
       for (let i = 0; i < groups.length; i++) {
         const sel = document.getElementById(`manualSel${suffix}_${i}`);
         if (!sel || sel.disabled || sel.value == -1) {
-            // 選択なしの場合、そのトリガーはスキップするか、エラーにするか
-            // ここではスキップ（直結）扱いにします
             continue; 
         }
         const p = groups[i].pois[Number(sel.value)];
@@ -3072,7 +3072,6 @@ window.drawManualComparison = async function() {
     // --- ルート計算関数 ---
     const calcRoute = async (picks) => {
       const wps = [start, ...picks, goal].map(p => ({ lat: p.lat, lon: p.lon, name: p.name || 'WP' }));
-      // 一括計算(Batch)を利用
       return await routeLegStatsForWaypoints(wps, profile);
     };
 
@@ -3092,12 +3091,11 @@ window.drawManualComparison = async function() {
     // プランB (赤)
     if (resB && resB.feature) {
       L.geoJSON(resB.feature, {
-        style: { color: '#aa0000', weight: 6, opacity: 0.7, dashArray: '10,5' } // 赤は破線にして区別しやすく
+        style: { color: '#aa0000', weight: 6, opacity: 0.7, dashArray: '10,5' }
       }).bindTooltip("プランB").addTo(manualRouteLayerGroup);
     }
 
-    // マーカー配置 (Start/Goal + 両方のPOI)
-    // 重なる可能性が高いですが、シンプルに全部置きます
+    // ピン配置
     const addMarker = (p, label, colorUrl) => {
         L.marker([p.lat, p.lon], {
             icon: new L.Icon({
@@ -3106,9 +3104,7 @@ window.drawManualComparison = async function() {
             })
         }).bindTooltip(label).addTo(manualRouteLayerGroup);
     };
-    // 青ピン
     picksA.forEach((p,i) => addMarker(p, `A-${i+1}`, 'https://maps.gstatic.com/mapfiles/ms2/micons/blue-dot.png'));
-    // 赤ピン
     picksB.forEach((p,i) => addMarker(p, `B-${i+1}`, 'https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png'));
 
 
@@ -3129,18 +3125,15 @@ window.drawManualComparison = async function() {
         sigma: calcSigmaFromStats(sB.dist)
     };
 
-    const diffDist = statsA.dist - statsB.dist; // A - B
+    const diffDist = statsA.dist - statsB.dist; 
     const diffSigma = statsA.sigma - statsB.sigma;
-
     const fmt = (n, d=2) => Number(n).toFixed(d);
     
-    // スコア判定 (MSEベース = 分散)
-    // σが小さい方が優秀
+    // 判定
     const winnerColor = (statsA.sigma < statsB.sigma) ? '#0055aa' : '#aa0000';
     const winnerName  = (statsA.sigma < statsB.sigma) ? 'プランA' : 'プランB';
 
     let html = `<div style="font-size:0.9rem;">`;
-    
     html += `
     <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
       <tr style="background:#f4f4f4;">
@@ -3176,8 +3169,7 @@ window.drawManualComparison = async function() {
     html += `</div>`;
     infoBox.innerHTML = html;
 
-    // ズーム合わせ
-    if (manualRouteLayerGroup) {
+    if (manualRouteLayerGroup && manualRouteLayerGroup.getLayers().length > 0) {
        const b = manualRouteLayerGroup.getBounds();
        if (b.isValid()) map.fitBounds(b.pad(0.1));
     }
@@ -4382,3 +4374,4 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
