@@ -1082,21 +1082,25 @@ function makeRestPoints(feature) {
   return results;
 }
 
-/* ===== 区間統計（各ルート） ===== */
+/* ==========================================================
+   【修正版】区間統計（各ルート）
+   ※ ステップ単位ではなく、セグメント（休憩地点間）単位で集計するように修正
+   ========================================================== */
 async function calcLegStats(feature, _unusedMass, _unusedFlat){
-  const coords = feature.geometry.coordinates;
-  const segs   = feature.properties.segments || [];
+  const segs = feature.properties.segments || [];
 
   const legDist = [], legTime = [];
+  
+  // 修正箇所: stepsのループを削除し、segmentsのdistance/durationを直接使う
   for (const s of segs) {
-    for (const step of (s.steps || [])) {
-      const d  = step.distance || 0;  // m
-      const t  = step.duration || 0;  // s
+      const d = s.distance || 0; // m
+      const t = s.duration || 0; // s
+      
       legDist.push(d / 1000); // km
       legTime.push(t / 60);   // min
-    }
   }
-  return { dist:legDist, time:legTime };
+  
+  return { dist: legDist, time: legTime };
 }
 
 function summaryStats(arr){
@@ -3185,25 +3189,6 @@ window.drawManualComparison = async function() {
     }
   }
 };
-/* =====================================================================
-   【アルゴリズム比較・統合版 (7種盛り)】
-   評価基準：すべて「距離のばらつき（MSE）」で統一
-   
-   1. 総当たり (Ground Truth)
-   2. 純粋Viterbi (Goal無視, Start考慮)
-   3. 直線比較 (Zero API)
-   4. 純粋ビームサーチ (Start/Goal考慮, BeamWidth=5)
-   5. SG排除・純粋Viterbi (Start/Goal無視)
-   6. 純粋Viterbi + 再ランク (Start/Goal考慮)
-   7. SG排除・純粋Viterbi + 再ランク (探索時Start無視 → 評価時Start/Goal考慮)
-   ===================================================================== */
-
-/**
- * 【汎用Viterbiソルバー】
- * 対策2, 5, 6, 7 のロジックをこれ1つで処理します。
- * * @param options.ignoreStart trueならStartコストを0にする(探索時)
- * @param options.ignoreGoalInRank trueならGoal区間を順位決定に含めない(再評価時)
- */
 /* ==========================================================
    【完全修正版】汎用Viterbiソルバー (コスト配分ロジック実装済み)
    ========================================================== */
@@ -4374,6 +4359,3 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
-
-
-
