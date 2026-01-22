@@ -860,8 +860,8 @@ async function drawRoutes(){
     const rests = await makeRestPoints(baseFeature, mass, flat);
     tEnd(tkRest, `hits=${rests.length}`);
 
-
     restGroups = (rests || []).map(r => ({ rest: r, pois: [] }));
+    window.restGroups = restGroups;
 
     restList = []; // 前回のリストをリセット
 
@@ -4269,44 +4269,55 @@ function getTimeStr() {
     return new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
 }
 
-// 【新規】計算結果から手動比較UIにベスト解をセットする関数
+// 【強化版】計算結果から手動比較UIにベスト解をセットする関数
 function autoSetManualComparison(bfList, vitList) {
     console.log('[AutoSet] Setting manual comparison inputs...');
     
-    // 1. UIをリセット（セレクトボックス再生成）
+    // 1. UIをリセット（確実に要素を生成）
     if (typeof updateManualRouteUI === 'function') {
         updateManualRouteUI();
+    } else {
+        console.warn('[AutoSet] updateManualRouteUI function is missing!');
+        return;
     }
 
-    // 2. ベスト解を取得 (nullチェック含む)
+    // 2. ベスト解を取得
     const bestBf = (bfList && bfList.length > 0) ? bfList[0] : null;
     const bestVit = (vitList && vitList.length > 0) ? vitList[0] : null;
 
     if (!bestBf && !bestVit) {
-        console.log('[AutoSet] No results to set.');
+        console.log('[AutoSet] No results to set (BF/Vit list empty).');
         return;
     }
 
-    // 3. POIのインデックス特定ヘルパー
-    // restGroups[triggerIdx].pois の中で、targetPoi と一致する index を探す
+    // 3. POIマッチング用ヘルパー（許容誤差付き）
     const findPoiIndex = (triggerIdx, targetPoi) => {
         if (!targetPoi) return -1;
-        const group = (window.restGroups && window.restGroups[triggerIdx]) ? window.restGroups[triggerIdx] : null;
+        // グローバル変数から安全に取得
+        const groups = (window.restGroups && window.restGroups.length) 
+                       ? window.restGroups 
+                       : (typeof restGroups !== 'undefined' ? restGroups : []);
+        
+        const group = groups[triggerIdx];
         if (!group || !Array.isArray(group.pois)) return -1;
 
-        // 座標で厳密比較 (誤差吸収のためtoFixed使用)
-        const tLat = Number(targetPoi.lat).toFixed(5);
-        const tLon = Number(targetPoi.lon).toFixed(5);
+        const tLat = Number(targetPoi.lat ?? targetPoi.y);
+        const tLon = Number(targetPoi.lon ?? targetPoi.x);
 
         return group.pois.findIndex(p => {
-            const pLat = Number(p.lat).toFixed(5);
-            const pLon = Number(p.lon).toFixed(5);
-            return pLat === tLat && pLon === tLon;
+            const pLat = Number(p.lat ?? p.y);
+            const pLon = Number(p.lon ?? p.x);
+            
+            // 距離の二乗誤差が非常に小さければ一致とみなす
+            // (数値計算誤差や、API返却値の微差を吸収)
+            const distSq = (pLat - tLat)**2 + (pLon - tLon)**2;
+            return distSq < 0.0000001; 
         });
     };
 
     // 4. セレクトボックスに反映
-    const T = window.restGroups ? window.restGroups.length : 0;
+    const T = (window.restGroups || []).length;
+    let countA = 0, countB = 0;
 
     for (let i = 0; i < T; i++) {
         // プランA (総当たり 1位) -> 青
@@ -4315,8 +4326,8 @@ function autoSetManualComparison(bfList, vitList) {
             const selA = document.getElementById(`manualSelA_${i}`);
             if (selA && idxA !== -1) {
                 selA.value = idxA;
-                // 色付けして分かりやすく
-                selA.style.backgroundColor = '#eef7ff'; 
+                selA.style.backgroundColor = '#eef7ff';
+                countA++;
             }
         }
 
@@ -4327,28 +4338,28 @@ function autoSetManualComparison(bfList, vitList) {
             if (selB && idxB !== -1) {
                 selB.value = idxB;
                 selB.style.backgroundColor = '#fff0f0';
+                countB++;
             }
         }
     }
     
-    // 5. ボタンテキスト更新 & 完了通知
+    console.log(`[AutoSet] Result: A=${countA}/${T}, B=${countB}/${T}`);
+
+    // 5. ボタンとメッセージの更新
     const btn = document.getElementById('btnDrawManualRoute');
     if(btn) {
         btn.textContent = '自動設定完了（描画ボタンを押してください）';
-        // 目立たせるアニメーション
-        btn.style.transition = 'background 0.5s';
-        btn.style.background = '#ffd700';
-        setTimeout(() => btn.style.background = '', 1000);
+        btn.style.background = '#ffd700'; // 黄色で目立たせる
+        setTimeout(() => btn.style.background = '', 3000);
     }
     
-    // メッセージ表示
     const infoBox = document.getElementById('manualRouteInfo');
     if(infoBox) {
         infoBox.innerHTML = `
-        <div style="padding:5px; background:#eeffee; border:1px solid #ccffcc; border-radius:4px; font-weight:bold; color:green;">
-           ✅ 自動設定完了<br>
-           プランA(青) = 総当たり 1位<br>
-           プランB(赤) = Viterbi 1位
+        <div style="padding:5px; background:#eeffee; border:1px solid #ccffcc; border-radius:4px; font-weight:bold; color:green; margin-top:4px;">
+            ✅ 自動設定完了<br>
+            <span style="color:#0055aa">■ プランA: 総当たり1位</span><br>
+            <span style="color:#aa0000">■ プランB: Viterbi 1位</span>
         </div>`;
     }
 }
@@ -4359,3 +4370,4 @@ window.downloadViterbiEdgesCsv = downloadViterbiLogCsv;
 </script>
 </body>
 </html>
+
